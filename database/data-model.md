@@ -4,106 +4,141 @@
 
 UniTrack is a university equipment borrowing and management system.
 
-The database stores information about:
-- University users and their roles
-- Equipment categories
-- Equipment items
-- Equipment status changes
+The database is implemented using PostgreSQL, hosted on Supabase.
 
-The database uses PostgreSQL, hosted on Supabase.
+The application uses:
+- Next.js and TypeScript
+- PostgreSQL
+- Supabase Auth
+- `pg` for server-side database connections
 
-The initial database structure supports Sprint 1 and is designed
-to be extended in later sprints for reservations, borrowing,
-returns, kits, and equipment inspections.
+The database supports equipment management, reservations, borrowing, returns, kits, condition records, and equipment status tracking.
+
+This document describes the complete data model required by Jira S1-04.
+
+**Implementation status:** The initial four tables are already deployed in Supabase. The additional tables and lab associations are part of the expanded design and must be reviewed before migration.
+
+---
 
 ## 2. Database Tables
 
-### Table 1: profiles
+The model contains the eight record types required by Jira:
 
-Stores information about users registered in UniTrack.
+1. Item
+2. Kit
+3. Component
+4. User
+5. Reservation
+6. Loan
+7. Condition record
+8. Status history
 
-Supabase Auth manages authentication through the auth.users table.
-The profiles table stores additional information needed by UniTrack.
+Two supporting tables are also included:
 
-| Column | Data Type | Constraint |
+- Labs
+- Equipment categories
+
+Therefore, the complete model contains 10 tables.
+
+### Table 1: labs
+
+Stores information about university laboratories.
+
+| Column | Data Type | Constraints |
 |---|---|---|
-| id | UUID | Primary Key, Foreign Key to auth.users(id), ON DELETE CASCADE |
+| id | INTEGER | Primary Key, Identity |
+| code | VARCHAR(40) | UNIQUE, NOT NULL |
+| name | VARCHAR(150) | NOT NULL |
+| is_active | BOOLEAN | NOT NULL, DEFAULT TRUE |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT CURRENT_TIMESTAMP |
+
+Important rules:
+
+- Each lab has a unique identifier.
+- Users and equipment are associated with a lab.
+- New labs can be added without changing the database structure.
+- Labs can be deactivated without deleting historical information.
+
+This supports NF-11: adding more labs in the future.
+
+### Table 2: profiles
+
+Stores information about students and university staff.
+
+Supabase Auth manages login through `auth.users`.
+
+| Column | Data Type | Constraints |
+|---|---|---|
+| id | UUID | Primary Key, FK to auth.users(id) |
 | full_name | VARCHAR(100) | NOT NULL |
 | university_email | VARCHAR(255) | UNIQUE, NOT NULL |
-| role | VARCHAR(30) | NOT NULL, DEFAULT 'student', CHECK constraint |
+| role | VARCHAR(30) | CHECK constraint, DEFAULT 'student' |
+| lab_id | INTEGER | NOT NULL, FK to labs(id) |
 | is_active | BOOLEAN | NOT NULL, DEFAULT TRUE |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT CURRENT_TIMESTAMP |
 
 Supported roles:
+
 - student
 - lab_manager
 - lab_assistant
 - administrator
 
 Important rules:
-- Each profile belongs to one authenticated Supabase user.
-- The profile ID must match the corresponding auth.users ID.
-- University emails must be unique.
-- Every user must have one of the four supported roles.
-- New profiles receive the student role by default unless another
-  role is assigned through an authorized process.
-- If an authenticated user is deleted, their profile is also deleted.
 
-Authentication and profile creation will be coordinated with the
-team member responsible for login and permissions (NH).
+- Every profile belongs to one authenticated user.
+- Every user and staff member has a lab ID.
+- Students and staff are distinguished through the `role` column.
+- Users cannot assign themselves privileged roles.
+- User permissions will be implemented with NH.
 
-The database table does not automatically create profiles when
-users register. That functionality must be implemented separately.
+The expanded model assumes that each profile belongs to one primary lab. This assumption requires Product Owner approval.
 
-Security note:
-Students must not be allowed to assign themselves administrator
-or other privileged roles. This restriction will be enforced
-through application authorization and database access policies.
+### Table 3: equipment_categories
 
-### Table 2: equipment_categories
+Stores equipment categories.
 
-Stores the different categories of university equipment.
-
-| Column | Data Type | Constraint |
+| Column | Data Type | Constraints |
 |---|---|---|
-| id | INTEGER | Primary Key, GENERATED ALWAYS AS IDENTITY |
+| id | INTEGER | Primary Key, Identity |
 | name | VARCHAR(100) | UNIQUE, NOT NULL |
 | description | TEXT | Optional |
 | is_active | BOOLEAN | NOT NULL, DEFAULT TRUE |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT CURRENT_TIMESTAMP |
 
-Example categories:
+Examples:
+
 - Electronics
 - Laboratory Equipment
 - Audio/Visual Equipment
 
 Important rules:
-- Each category has a unique, automatically generated ID.
-- Category names cannot be duplicated using the exact same value.
-- New categories can be added directly to the database.
-- Categories can be marked inactive using is_active.
-- Creating a new category does not require modifying application code.
 
-This table supports the Sprint 1 requirement to manage equipment
-categories dynamically.
+- Each category has a unique ID.
+- Category names cannot be duplicated.
+- New categories can be created without changing application code.
+- Categories can be deactivated.
+- A category cannot be deleted while equipment references it.
 
-### Table 3: equipment_items
+Categories are shared supporting records and are not assigned to one specific lab.
 
-Stores information about each physical equipment item registered
-in UniTrack.
+### Table 4: equipment_items
 
-| Column | Data Type | Constraint |
+Stores physical equipment items.
+
+| Column | Data Type | Constraints |
 |---|---|---|
 | id | UUID | Primary Key, DEFAULT gen_random_uuid() |
 | asset_code | VARCHAR(50) | UNIQUE, NOT NULL |
 | name | VARCHAR(150) | NOT NULL |
 | description | TEXT | Optional |
 | serial_number | VARCHAR(100) | Optional |
-| category_id | INTEGER | NOT NULL, Foreign Key to equipment_categories(id), ON DELETE RESTRICT |
-| status | VARCHAR(30) | NOT NULL, DEFAULT 'available', CHECK constraint |
-| created_by | UUID | Optional Foreign Key to profiles(id), ON DELETE SET NULL |
-| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT CURRENT_TIMESTAMP |
-| updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT CURRENT_TIMESTAMP |
+| category_id | INTEGER | NOT NULL, FK to equipment_categories |
+| lab_id | INTEGER | NOT NULL, FK to labs |
+| status | VARCHAR(30) | NOT NULL, DEFAULT 'available', CHECK |
+| created_by | UUID | Optional FK to profiles |
+| created_at | TIMESTAMPTZ | NOT NULL |
+| updated_at | TIMESTAMPTZ | NOT NULL |
 
 Confirmed equipment status values:
 
@@ -117,347 +152,488 @@ Confirmed equipment status values:
 | retired | Retired |
 
 Important rules:
-- Every physical item has a unique UUID.
-- Every physical item must have a unique asset code.
-- Every equipment item must belong to an existing category.
-- Equipment cannot reference a nonexistent category.
-- A category cannot be deleted while equipment references it.
-- Equipment must have one of the supported statuses.
-- New equipment receives the status 'available' by default.
-- The created_by column identifies the user who registered the item.
-- created_by can temporarily be NULL while authentication is being developed.
-- If a creator's profile is deleted, the equipment record is preserved
-  and created_by becomes NULL.
 
-QR code handling:
-- Each item has a unique asset_code.
-- A QR code can be generated using the asset code or an item URL.
-- It is not necessary to store a QR code image in the database.
-- The QR scanning and label functionality will be implemented separately.
+- Every item has a unique UUID and asset code.
+- Every item belongs to a category and a lab.
+- An item cannot reference a nonexistent category or lab.
+- New equipment starts with status `available`.
+- Retired items are identified by `status = 'retired'`.
+- Retired items should not appear in the active student catalogue.
+- A QR code can be generated using the asset code or item URL.
+- The QR code image does not need to be stored in the database.
+- The PostgreSQL trigger automatically updates `updated_at` whenever an item is modified.
 
-Timestamp handling:
-- created_at records when the equipment was created.
-- updated_at initially receives the creation timestamp.
-- Automatically updating updated_at when equipment is edited
-  requires additional application logic or a database trigger.
+### Table 5: kits
 
-Example equipment item:
+Identifies equipment items that are borrowed as kits.
 
-Asset code: UT-LAP-001
-Name: Dell Latitude Laptop
-Description: Demo laptop available for student borrowing
-Serial number: DEMO-LAP-SN-001
-Category: Electronics
-Status: available
-
-### Table 4: equipment_status_history
-
-Stores the history of status changes for equipment items.
-
-| Column | Data Type | Constraint |
+| Column | Data Type | Constraints |
 |---|---|---|
-| id | INTEGER | Primary Key, GENERATED ALWAYS AS IDENTITY |
-| item_id | UUID | NOT NULL, Foreign Key to equipment_items(id), ON DELETE RESTRICT |
-| old_status | VARCHAR(30) | Optional |
-| new_status | VARCHAR(30) | NOT NULL |
-| changed_by | UUID | Optional Foreign Key to profiles(id), ON DELETE SET NULL |
-| reason | TEXT | Optional |
-| changed_at | TIMESTAMPTZ | NOT NULL, DEFAULT CURRENT_TIMESTAMP |
+| item_id | UUID | Primary Key, FK to equipment_items(id) |
+| lab_id | INTEGER | NOT NULL, FK to labs(id) |
+| created_at | TIMESTAMPTZ | NOT NULL |
 
 Important rules:
-- Every history record belongs to an existing equipment item.
-- Each status change should create a separate history record.
-- A history record stores the previous and new statuses.
-- The changed_by column identifies the user responsible for the change.
-- The reason column can explain why the status changed.
-- The changed_at column records when the change occurred.
-- Equipment cannot be deleted while history records reference it.
-- If a user's profile is deleted, existing history records are preserved
-  and changed_by becomes NULL.
+
+- A kit is also an equipment item.
+- The kit uses the same UUID as its corresponding equipment item.
+- Its name, asset code, category, and status are stored in `equipment_items`.
+- A kit can contain several components.
+- A kit can be reserved or borrowed as one unit.
+
+This design allows reservations and loans to use `item_id` for both individual items and kits.
+
+### Table 6: kit_components
+
+Stores the components included in equipment kits.
+
+| Column | Data Type | Constraints |
+|---|---|---|
+| id | UUID | Primary Key |
+| kit_item_id | UUID | NOT NULL, FK to kits(item_id) |
+| lab_id | INTEGER | NOT NULL, FK to labs(id) |
+| component_name | VARCHAR(150) | NOT NULL |
+| quantity_required | INTEGER | NOT NULL, greater than 0 |
+| tracked_item_id | UUID | Optional FK to equipment_items |
+| is_required | BOOLEAN | NOT NULL, DEFAULT TRUE |
+| is_active | BOOLEAN | NOT NULL, DEFAULT TRUE |
+| created_at | TIMESTAMPTZ | NOT NULL |
 
 Example:
 
-An equipment item changes from:
+An electronics kit contains:
 
-available → checked_out
+- 1 Arduino board
+- 2 USB cables
+- 1 Breadboard
+- 10 Jumper wires
 
-A history record should contain:
+Important rules:
+
+- Every component belongs to a kit.
+- Each component specifies the expected quantity.
+- A component can optionally reference an individually tracked equipment item.
+- Components can be marked inactive.
+- The application must ensure that a kit and its components belong to the correct lab.
+
+### Table 7: reservations
+
+Stores future equipment bookings.
+
+| Column | Data Type | Constraints |
+|---|---|---|
+| id | UUID | Primary Key |
+| item_id | UUID | NOT NULL, FK to equipment_items |
+| borrower_id | UUID | NOT NULL, FK to profiles |
+| lab_id | INTEGER | NOT NULL, FK to labs |
+| start_at | TIMESTAMPTZ | NOT NULL |
+| end_at | TIMESTAMPTZ | NOT NULL |
+| status | VARCHAR(20) | CHECK constraint |
+| created_at | TIMESTAMPTZ | NOT NULL |
+
+Reservation status values:
+
+- pending
+- confirmed
+- cancelled
+- fulfilled
+- expired
+
+Important rules:
+
+- A reservation belongs to a user and an equipment item.
+- A reservation defines a start and end time.
+- The end time must be later than the start time.
+- Kits can be reserved using their equipment item ID.
+- Preventing overlapping confirmed reservations will be implemented in Sprint 2.
+
+**Critical requirement:**
+
+A future reservation must not automatically change the item's current physical status.
+
+Example:
+
+A laptop is currently Available.
+
+A student reserves it for next week.
+
+The laptop remains Available until an actual physical status change occurs.
+
+Reservations and equipment statuses are separate records.
+
+This satisfies the S1-04 acceptance criteria.
+
+### Table 8: loans
+
+Stores information about equipment physically borrowed by students.
+
+| Column | Data Type | Constraints |
+|---|---|---|
+| id | UUID | Primary Key |
+| item_id | UUID | NOT NULL, FK to equipment_items |
+| borrower_id | UUID | NOT NULL, FK to profiles |
+| reservation_id | UUID | Optional unique FK to reservations |
+| lab_id | INTEGER | NOT NULL, FK to labs |
+| borrowed_at | TIMESTAMPTZ | NOT NULL |
+| due_date | TIMESTAMPTZ | NOT NULL |
+| returned_at | TIMESTAMPTZ | Optional |
+| created_at | TIMESTAMPTZ | NOT NULL |
+
+Important rules:
+
+- A loan records an actual equipment handover.
+- Every loan belongs to an item and a borrower.
+- A loan may be linked to a reservation.
+- An active loan has `returned_at IS NULL`.
+- The due date must be later than the borrowing time.
+- An item cannot have two active loans simultaneously.
+- Historical loans cannot be deleted.
+
+The database includes a partial unique index to prevent multiple active loans for the same item.
+
+**Catalogue integration:**
+
+When an item is Borrowed, the catalogue can retrieve its expected return date from the active loan.
+
+The `due_date` field supports the Sprint 1 catalogue acceptance criteria.
+
+The full borrowing and return workflow will be implemented in Sprint 2.
+
+### Table 9: condition_records
+
+Stores equipment condition information during pickup, return, and inspection.
+
+| Column | Data Type | Constraints |
+|---|---|---|
+| id | UUID | Primary Key |
+| loan_id | UUID | NOT NULL, FK to loans |
+| item_id | UUID | NOT NULL, FK to equipment_items |
+| kit_component_id | UUID | Optional FK to kit_components |
+| lab_id | INTEGER | NOT NULL, FK to labs |
+| phase | VARCHAR(20) | CHECK constraint |
+| condition_status | VARCHAR(20) | CHECK constraint |
+| notes | TEXT | Optional |
+| recorded_by | UUID | Optional FK to profiles |
+| recorded_at | TIMESTAMPTZ | NOT NULL |
+
+Supported phases:
+
+- pickup
+- return
+- inspection
+
+Condition values:
+
+- good
+- damaged
+- missing
+- unknown
+
+Important rules:
+
+- Condition records are associated with loans.
+- Staff can record the condition of an item at pickup or return.
+- Kit components can have individual condition records.
+- Historical condition records cannot be deleted.
+- Additional records preserve the history of condition changes.
+
+This supports NF-7.
+
+### Table 10: equipment_status_history
+
+Stores the history of equipment physical status changes.
+
+| Column | Data Type | Constraints |
+|---|---|---|
+| id | INTEGER | Primary Key, Identity |
+| item_id | UUID | NOT NULL, FK to equipment_items |
+| lab_id | INTEGER | NOT NULL, FK to labs |
+| old_status | VARCHAR(30) | Optional |
+| new_status | VARCHAR(30) | NOT NULL |
+| changed_by | UUID | Optional FK to profiles |
+| reason | TEXT | Optional |
+| changed_at | TIMESTAMPTZ | NOT NULL |
+
+Example:
+
+An item changes from:
+
+`available → checked_out`
+
+A history record stores:
+
 - old_status: available
 - new_status: checked_out
 - reason: Equipment handed over to student
 
-When the equipment is returned:
+Important rules:
 
-checked_out → available
+- Each physical status change should create a history record.
+- The record identifies the old and new statuses.
+- The user responsible can be recorded.
+- Records remain associated with their equipment item.
+- The status-history implementation belongs to SC.
+- The existing timestamp trigger does not automatically create history records.
 
-Another history record should be created.
-
-Important implementation note:
-
-The equipment_status_history table has been created in PostgreSQL.
-
-However, creating this table does not automatically record status changes.
-
-The functionality that creates history records when equipment status
-changes must be implemented separately.
-
-This functionality belongs to Jira S1-10 and will be developed by SC,
-in coordination with the database structure created by JS.
+---
 
 ## 3. Database Relationships
 
-### Relationship 1: Auth Users — Profiles
+### Lab relationships
 
-- Each profile belongs to one authenticated Supabase user.
-- The profiles.id column references auth.users.id.
-- Deleting an Auth user also deletes the associated profile.
+- One lab can have many users.
+- One lab can have many equipment items.
+- One lab can have many kits and kit components.
+- One lab can have many reservations and loans.
+- Historical condition and status records retain their lab IDs.
 
-Relationship:
-auth.users (1) → profiles (0 or 1)
+### Category relationships
 
-### Relationship 2: Equipment Categories — Equipment Items
+One category can contain many equipment items.
 
-- One category can contain many equipment items.
-- Each equipment item belongs to exactly one category.
+`equipment_categories.id → equipment_items.category_id`
 
-Relationship:
-equipment_categories (1) → equipment_items (Many)
+### Kit relationships
 
-Foreign Key:
-equipment_items.category_id → equipment_categories.id
+An equipment item may be a kit.
 
-### Relationship 3: Profiles — Equipment Items
+`equipment_items.id → kits.item_id`
 
-- One user can register multiple equipment items.
-- An equipment item may temporarily have no recorded creator.
+One kit can contain many components.
 
-Relationship:
-profiles (1) → equipment_items (Many)
+`kits.item_id → kit_components.kit_item_id`
 
-Foreign Key:
-equipment_items.created_by → profiles.id
+### User relationships
 
-### Relationship 4: Equipment Items — Status History
+One user can:
 
-- One equipment item can have multiple status history records.
-- Each history record belongs to exactly one equipment item.
+- Register multiple equipment items.
+- Make multiple reservations.
+- Borrow multiple items.
+- Record equipment conditions, if authorized.
+- Perform equipment status changes, if authorized.
 
-Relationship:
-equipment_items (1) → equipment_status_history (Many)
+### Reservation relationships
 
-Foreign Key:
-equipment_status_history.item_id → equipment_items.id
+One item can have multiple reservations at different periods.
 
-### Relationship 5: Profiles — Status History
+A reservation belongs to one user.
 
-- One user can perform multiple equipment status changes.
-- Each history record may identify the user who made the change.
+A reservation may be associated with one loan.
 
-Relationship:
-profiles (1) → equipment_status_history (Many)
+### Loan relationships
 
-Foreign Key:
-equipment_status_history.changed_by → profiles.id
+One item can have multiple historical loans.
+
+One user can have multiple loans.
+
+An item can have at most one active loan at a time.
+
+One loan can have multiple condition records.
+
+### Status history relationships
+
+One item can have multiple status history records.
+
+Each history record belongs to one item.
+
+---
 
 ## 4. Important Database Constraints
 
-### Primary Keys
+### Primary keys
 
 Each table has a primary key that uniquely identifies its records.
 
-- profiles: id
-- equipment_categories: id
-- equipment_items: id
-- equipment_status_history: id
+### Foreign keys
 
-### Foreign Keys
+Foreign keys prevent records from referencing nonexistent related records.
 
-Foreign keys maintain relationships between tables.
-
-- profiles.id references auth.users.id
-- equipment_items.category_id references equipment_categories.id
-- equipment_items.created_by references profiles.id
-- equipment_status_history.item_id references equipment_items.id
-- equipment_status_history.changed_by references profiles.id
-
-### UNIQUE Constraints
+### Unique constraints
 
 The database prevents duplicate values for:
 
-- profiles.university_email
-- equipment_categories.name
-- equipment_items.asset_code
+- Lab codes
+- University email addresses
+- Equipment category names
+- Equipment asset codes
+- Kit component names within the same kit
+- Multiple active loans for the same item
 
-### CHECK Constraints
+### Check constraints
 
-The profiles table accepts only the four supported user roles.
+The database validates:
 
-The equipment_items table accepts only the defined equipment statuses.
+- User roles
+- Equipment statuses
+- Reservation statuses
+- Reservation periods
+- Loan dates
+- Component quantities
+- Condition record phases
+- Condition values
 
-### NOT NULL Constraints
+### Historical record protection
 
-Required fields cannot contain NULL values.
+Past loans and condition records must not be deleted.
 
-Examples:
-- Equipment name
-- Equipment asset code
-- Equipment category
-- Equipment status
-- University email
+The proposed database schema includes triggers that reject deletion from:
 
-### Default Values
+- `loans`
+- `condition_records`
 
-PostgreSQL automatically generates certain values.
+### Row Level Security
 
-Examples:
-- Category IDs
-- Equipment UUIDs
-- Default equipment status: available
-- Default user role: student
-- Creation timestamps
-- Default active status: TRUE
+RLS is enabled on the existing four tables.
 
-## 5. Database Testing
+The expanded schema also enables RLS on the additional tables.
 
-The initial database structure has been implemented in Supabase.
+NH will implement and test the required authentication and authorization policies.
 
-The following operations were tested successfully:
+Server-side API routes must still verify user permissions and lab access.
 
-### Test 1: Equipment Insertion and Retrieval
+---
 
-A sample laptop was inserted into equipment_items.
+## 5. Jira S1-04 Acceptance Criteria
 
-The equipment was retrieved using a JOIN with equipment_categories.
+### Criterion 1: Complete data model
 
-Result: PASS
+The model includes:
 
-### Test 2: Duplicate Equipment Code
+- Item
+- Kit
+- Component
+- User
+- Reservation
+- Loan
+- Condition record
+- Status history
 
-An attempt was made to insert another equipment item
-with the same asset code.
+It also includes supporting tables for labs and equipment categories.
 
-PostgreSQL rejected the insertion.
+Status: **Designed — awaiting Product Owner review.**
 
-Result: PASS
+### Criterion 2: Lab identification (NF-11)
 
-### Test 3: Invalid Category
+Items, users, staff, and other lab-owned records store `lab_id`.
 
-An attempt was made to insert equipment with a nonexistent category ID.
+The model supports adding additional labs.
 
-PostgreSQL rejected the insertion.
+Status: **Included in the design.**
 
-Result: PASS
+### Criterion 3: Historical records cannot be deleted (NF-7)
 
-### Test 4: Invalid Equipment Status
+The proposed schema protects loan and condition records using deletion-prevention triggers.
 
-An attempt was made to change an equipment status to 'broken',
-which is not included in the permitted status values.
+Status: **Included in the design; migration and testing pending.**
 
-PostgreSQL rejected the update.
+### Criterion 4: Future reservations do not change physical status
 
-The original status remained unchanged.
+Reservations are stored separately from equipment status.
 
-Result: PASS
+Creating a future reservation does not automatically update `equipment_items.status`.
 
-Detailed test queries and results are documented in TESTING.md.
+Status: **Included in the design.**
 
-## 6. Security and Authentication
+---
 
-Supabase Auth will manage user authentication.
+## 6. Sprint Implementation
 
-The profiles table will store application-specific user information.
+### Already implemented in Supabase
 
-Database security will include:
-- Authentication through Supabase Auth
-- Role-based permissions
-- Row Level Security (RLS)
-- Controlled access to sensitive operations
+- Equipment categories
+- User profiles
+- Equipment items
+- Equipment status history
+- Primary and foreign keys for the original four tables
+- Equipment status validation
+- Five demo equipment records
+- Automatic equipment update timestamps
+- Initial database testing
+- RLS enabled on the original four tables
 
-RLS was configured to be enabled automatically when the
-Supabase project was created.
+### Designed but not yet deployed
 
-However, the application-specific access policies and
-role-based authorization logic have not yet been implemented.
+- Labs
+- Lab ID associations
+- Kits
+- Kit components
+- Reservations
+- Loans
+- Condition records
+- Historical record deletion protection
 
-These must be coordinated with NH, who is responsible for
-authentication and permissions.
+The expanded schema requires a migration before these changes become available in Supabase.
 
-## 7. Future Database Extensions
+---
 
-Later sprints will require additional database functionality.
+## 7. Responsibilities
 
-Planned extensions include:
-- Equipment reservations
-- Reservation cancellation
-- Equipment kits and kit components
-- Borrowing and return records
-- Custody history
-- Late returns
-- Equipment inspection records
+### JS — Database and Scrum Master
 
-These features are not included in the initial Sprint 1 schema.
+- Maintain the database schema.
+- Design tables and relationships.
+- Implement approved database migrations.
+- Prepare database test data.
+- Coordinate database integration.
+- Maintain database documentation.
 
-The current database structure provides a foundation for
-implementing them in later sprints.
+### ZZ — Product Owner and Catalogue
 
-## 8. Related Jira Cards
+- Review and approve the data model.
+- Integrate the catalogue with equipment and category data.
+- Display live equipment statuses.
+- Retrieve expected return dates from active loans.
 
-### Database Development
+### SN — Equipment Management
 
-S1-03 — Set up hosting, database and demo data
+- Implement equipment creation and updates.
+- Connect API operations to the database.
+- Validate equipment lab and category references.
 
-S1-04 — Design the data model
+### SC — Status History and QR Codes
 
-### Features Supported by the Database
+- Implement QR code functionality.
+- Record equipment status changes.
+- Integrate equipment status history.
 
-S1-05 — Log in with a university email
+### NH — Authentication and Permissions
 
-S1-06 — Four roles, permissions and user management
+- Implement Supabase Auth.
+- Manage user profiles and roles.
+- Implement authorization and RLS policies.
 
-S1-07 — Lab manager adds, edits and retires an item
+### LJ — Application Foundation
 
-S1-08 — New equipment categories without code changes
+- Set up the Next.js and TypeScript application.
+- Maintain the starter application and frontend foundation.
+- Coordinate application integration.
 
-S1-09 — Unique ID and QR code for each item
+---
 
-S1-10 — Item status model with history
+## 8. Implementation Files
 
-S1-12 — Student catalogue with live status
+The database work is maintained in the `database` directory.
 
-The database provides the structures needed by these features.
-Their complete application functionality is implemented
-by the responsible team members.
+- `schema.sql` — Complete database design
+- `data-model.md` — Tables, relationships, and constraints
+- `seed.sql` — Demo categories and equipment
+- `triggers.sql` — Equipment timestamp automation
+- `TESTING.md` — Database validation and tests
+- `erd.md` — Entity Relationship Diagram
+- `migration_002.sql` — Proposed migration for existing tables
 
-## 9. Implementation Files
+---
 
-The database work is stored in the following files:
+## 9. Product Owner Review
 
-- data-model.md: Database design and relationships
-- schema.sql: PostgreSQL table definitions and constraints
-- seed.sql: Sample categories and equipment data
-- TESTING.md: Database tests and expected results
+The following decisions require confirmation:
 
-All files are maintained in the UniTrack GitHub repository
-under the database development branch.
+1. Does each student and staff member belong to one primary lab?
+2. Is representing a kit as an equipment item acceptable?
+3. Are the proposed kit component fields sufficient?
+4. What lab code should be used for the initial demo data?
+5. Should the catalogue display the active loan's due date when equipment is Borrowed?
 
-## 10. Current Implementation Status
+The data model is ready for review.
 
-Completed:
-- Initial database design
-- Supabase project creation
-- Equipment categories table
-- User profiles table
-- Equipment items table
-- Equipment status history table
-- Primary and foreign key relationships
-- Sample equipment categories
-- Sample laptop record
-- Initial database constraint testing
-
-Remaining:
-- Automatic equipment updated_at handling
-- Coordination with authentication implementation
-- Application-specific database access policies
-- Additional sample equipment and testing
-- Integration with the Next.js backend
-- Future sprint database extensions
