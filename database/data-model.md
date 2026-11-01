@@ -105,13 +105,16 @@ in UniTrack.
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT CURRENT_TIMESTAMP |
 | updated_at | TIMESTAMPTZ | NOT NULL, DEFAULT CURRENT_TIMESTAMP |
 
-Proposed equipment statuses:
-- available
-- reserved
-- checked_out
-- inspection_required
-- under_maintenance
-- retired
+Confirmed equipment status values:
+
+| Database Value | Frontend Display |
+|---|---|
+| available | Available |
+| reserved | Reserved |
+| checked_out | Borrowed |
+| inspection_required | Inspection Required |
+| under_maintenance | Under Repair |
+| retired | Retired |
 
 Important rules:
 - Every physical item has a unique UUID.
