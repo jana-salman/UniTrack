@@ -123,3 +123,74 @@ individually in the Supabase SQL Editor.
 They must not be included in seed.sql.
 
 
+## Migration 002 — Expanded Database Verification
+
+Date: November 1, 2026
+
+### Migration Execution
+
+The expanded database migration was executed successfully in Supabase.
+
+A transaction rollback test was performed before applying the migration.
+
+Result: PASS
+
+### Test 1: Complete Database Structure
+
+Expected: 10 tables.
+
+Actual: 10 tables.
+
+Result: PASS
+
+### Test 2: Existing Equipment Preservation
+
+Expected: 5 original equipment records remain.
+
+Actual: 5 equipment records.
+
+Result: PASS
+
+### Test 3: Row Level Security
+
+Expected: RLS enabled on all 10 tables.
+
+Actual: 10 tables with RLS enabled.
+
+Result: PASS
+
+### Test 4: Historical Record Protection
+
+Expected: Three protection triggers exist and are enabled.
+
+Actual: Three enabled protection triggers.
+
+Result: PASS
+
+Note: Trigger presence was verified. Direct attempts to update or delete
+historical records have not yet been tested.
+
+### Test 5: Serial Number Uniqueness
+
+Expected: Unique index for non-null equipment serial numbers.
+
+Actual: One unique index.
+
+Result: PASS
+
+### Test 6: Demo Data
+
+The updated seed script executed successfully.
+
+The original equipment records were preserved without duplication.
+
+Result: PASS
+
+### Summary
+
+The expanded database migration and structural verification completed
+successfully.
+
+The implementation includes the additional tables, Electronics Lab
+(ELEC), equipment condition and restriction fields, updated roles,
+additional equipment statuses, and historical-record protection triggers.

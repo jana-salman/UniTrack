@@ -61,6 +61,15 @@ Important rules:
 
 This supports NF-11: adding more labs in the future.
 
+Initial laboratory:
+
+- Lab name: Electronics Lab
+- Lab code: ELEC
+
+The initial laboratory has been confirmed by the team.
+
+Additional laboratories can be added later without modifying the database structure.
+
 ### Table 2: profiles
 
 Stores information about students and university staff.
@@ -80,9 +89,9 @@ Supabase Auth manages login through `auth.users`.
 Supported roles:
 
 - student
-- lab_manager
 - lab_assistant
-- administrator
+- professor
+- lab_manager
 
 Important rules:
 
@@ -132,7 +141,9 @@ Stores physical equipment items.
 | asset_code | VARCHAR(50) | UNIQUE, NOT NULL |
 | name | VARCHAR(150) | NOT NULL |
 | description | TEXT | Optional |
-| serial_number | VARCHAR(100) | Optional |
+| serial_number | VARCHAR(100) | UNIQUE when not NULL |
+| condition | VARCHAR(30) | NOT NULL, DEFAULT 'unknown', CHECK constraint |
+| is_restricted | BOOLEAN | NOT NULL, DEFAULT FALSE |
 | category_id | INTEGER | NOT NULL, FK to equipment_categories |
 | lab_id | INTEGER | NOT NULL, FK to labs |
 | status | VARCHAR(30) | NOT NULL, DEFAULT 'available', CHECK |
@@ -141,7 +152,6 @@ Stores physical equipment items.
 | updated_at | TIMESTAMPTZ | NOT NULL |
 
 Confirmed equipment status values:
-
 | Database Value | Frontend Display |
 |---|---|
 | available | Available |
@@ -150,18 +160,22 @@ Confirmed equipment status values:
 | inspection_required | Inspection Required |
 | under_maintenance | Under Repair |
 | retired | Retired |
+| lost | Lost |
+| overdue | Overdue |
 
-Important rules:
+Additional equipment rules:
 
-- Every item has a unique UUID and asset code.
-- Every item belongs to a category and a lab.
-- An item cannot reference a nonexistent category or lab.
-- New equipment starts with status `available`.
-- Retired items are identified by `status = 'retired'`.
-- Retired items should not appear in the active student catalogue.
-- A QR code can be generated using the asset code or item URL.
-- The QR code image does not need to be stored in the database.
-- The PostgreSQL trigger automatically updates `updated_at` whenever an item is modified.
+- Equipment serial numbers must be unique when provided.
+- Multiple equipment items may have a NULL serial number.
+- The condition column stores the item's current physical condition.
+- Supported condition values are good, damaged, missing, and unknown.
+- New equipment receives the condition 'unknown' by default.
+- The is_restricted column identifies equipment with borrowing restrictions.
+- New equipment has is_restricted = FALSE by default.
+- Restricted equipment will require additional authorization during the borrowing workflow.
+- The lost status identifies equipment reported as lost.
+- The overdue status identifies equipment whose borrowing period has expired.
+- Overdue handling will be coordinated with the loans table and implemented in Sprint 2.
 
 ### Table 5: kits
 
@@ -375,6 +389,14 @@ Important rules:
 - The status-history implementation belongs to SC.
 - The existing timestamp trigger does not automatically create history records.
 
+Historical record protection:
+
+- Equipment status history is append-only.
+- New status history records can be inserted.
+- Existing status history records cannot be updated.
+- Existing status history records cannot be deleted.
+- A PostgreSQL trigger enforces these restrictions.
+- This preserves the complete equipment status history.
 ---
 
 ## 3. Database Relationships

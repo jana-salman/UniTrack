@@ -48,9 +48,9 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     role VARCHAR(30) NOT NULL DEFAULT 'student'
         CHECK (role IN (
             'student',
-            'lab_manager',
             'lab_assistant',
-            'administrator'
+            'professor',
+            'lab_manager'
         )),
 
     lab_id INTEGER NOT NULL
@@ -76,7 +76,17 @@ CREATE TABLE IF NOT EXISTS public.equipment_items (
 
     description TEXT,
 
-    serial_number VARCHAR(100),
+    serial_number VARCHAR(100) UNIQUE,
+
+condition VARCHAR(30) NOT NULL DEFAULT 'unknown'
+    CHECK (condition IN (
+        'good',
+        'damaged',
+        'missing',
+        'unknown'
+    )),
+
+is_restricted BOOLEAN NOT NULL DEFAULT FALSE,
 
     category_id INTEGER NOT NULL
         REFERENCES public.equipment_categories(id)
@@ -87,14 +97,16 @@ CREATE TABLE IF NOT EXISTS public.equipment_items (
         ON DELETE RESTRICT,
 
     status VARCHAR(30) NOT NULL DEFAULT 'available'
-        CHECK (status IN (
-            'available',
-            'reserved',
-            'checked_out',
-            'inspection_required',
-            'under_maintenance',
-            'retired'
-        )),
+    CHECK (status IN (
+        'available',
+        'reserved',
+        'checked_out',
+        'inspection_required',
+        'under_maintenance',
+        'retired',
+        'lost',
+        'overdue'
+    )),
 
     created_by UUID
         REFERENCES public.profiles(id)

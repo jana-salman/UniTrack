@@ -76,13 +76,15 @@ erDiagram
         varchar asset_code UK
         varchar name
         text description
-        varchar serial_number
+        varchar serial_number UK
         int category_id FK
         int lab_id FK
         varchar status
         uuid created_by FK
         timestamptz created_at
         timestamptz updated_at
+        varchar condition
+        boolean is_restricted
     }
 
     KITS {
