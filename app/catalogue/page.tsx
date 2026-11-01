@@ -5,6 +5,7 @@ import StatusBadge from "@/components/StatusBadge";
 
 type Item = {
   id: string;
+  assetCode: string;
   name: string;
   category: string;
   status: string;
@@ -107,7 +108,7 @@ export default function CataloguePage() {
               <StatusBadge status={item.status} />
             </div>
             <div style={{ color: "#4b5563", fontSize: 14, marginTop: 4 }}>
-              {item.id} · {item.category}
+              {item.assetCode} · {item.category}
             </div>
             {item.expectedReturn && (
               <div style={{ fontSize: 14, marginTop: 4 }}>

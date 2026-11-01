@@ -7,6 +7,8 @@ const COLOURS: Record<string, { bg: string; fg: string }> = {
   Borrowed: { bg: "#fef3c7", fg: "#92400e" },
   "Inspection Required": { bg: "#fee2e2", fg: "#991b1b" },
   "Under Repair": { bg: "#fee2e2", fg: "#991b1b" },
+  Overdue: { bg: "#fee2e2", fg: "#991b1b" },
+  Lost: { bg: "#e5e7eb", fg: "#111827" },
 };
 
 export default function StatusBadge({ status }: { status: string }) {
