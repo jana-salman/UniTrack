@@ -9,7 +9,7 @@ const targetId = "1b853b74-1797-4f67-9aa8-36618e8bd949";
 const manager: Profile = {
   id: "05910d42-6dc7-4fdb-a65a-7b1043b03e58",
   full_name: "Lab Manager",
-  university_email: "manager@unitrack.edu",
+  university_email: "manager@mail.aub.edu",
   role: "lab_manager",
   lab_id: 7,
   is_active: true,
@@ -57,33 +57,36 @@ describe("manager role update handler", () => {
     expect(response.status).toBe(403);
   });
 
-  it("updates a supported role only within the manager's laboratory", async () => {
-    const updatedProfile: Profile = {
-      ...manager,
-      id: targetId,
-      full_name: "Professor User",
-      role: "professor",
-    };
-    const updateRoleInLab = vi.fn().mockResolvedValue(updatedProfile);
-    const dependencies = {
-      authorizeManager: vi.fn().mockResolvedValue(manager),
-      updateRoleInLab,
-    };
+  it.each(["student", "lab_assistant", "professor", "lab_manager"] as const)(
+    "updates a demo user to the %s role within the manager's laboratory",
+    async (role) => {
+      const updatedProfile: Profile = {
+        ...manager,
+        id: targetId,
+        full_name: "Demo User",
+        role,
+      };
+      const updateRoleInLab = vi.fn().mockResolvedValue(updatedProfile);
+      const dependencies = {
+        authorizeManager: vi.fn().mockResolvedValue(manager),
+        updateRoleInLab,
+      };
 
-    const response = await handleRoleUpdate(
-      request("professor"),
-      targetId,
-      dependencies,
-    );
+      const response = await handleRoleUpdate(
+        request(role),
+        targetId,
+        dependencies,
+      );
 
-    expect(response.status).toBe(200);
-    expect(updateRoleInLab).toHaveBeenCalledWith(
-      targetId,
-      "professor",
-      manager.lab_id,
-    );
-    await expect(response.json()).resolves.toEqual({ profile: updatedProfile });
-  });
+      expect(response.status).toBe(200);
+      expect(updateRoleInLab).toHaveBeenCalledWith(
+        targetId,
+        role,
+        manager.lab_id,
+      );
+      await expect(response.json()).resolves.toEqual({ profile: updatedProfile });
+    },
+  );
 
   it("does not update a user outside the manager's laboratory", async () => {
     const dependencies = {
