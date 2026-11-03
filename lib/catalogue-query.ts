@@ -1,4 +1,4 @@
-import { pool } from "./db";
+import { getDatabasePool } from "./db";
 import { getEquipmentStatusLabel } from "./equipment-status";
 
 export type CatalogueItem = {
@@ -17,12 +17,14 @@ export type CatalogueItem = {
 // Retired items have status = 'retired'. We never select created_by or any
 // user column, so no student name can leak.
 //   loans(item_id, due_date, returned_at, ...)  -> active loan = returned_at IS NULL
+// Only items of the signed-in user's lab are returned (lab_id, NF-11).
 // The loans join only reads due_date. borrower_id is never selected.
 export async function getCatalogue(
   search = "",
-  category = ""
+  category = "",
+  labId: number
 ): Promise<CatalogueItem[]> {
-  const { rows } = await pool.query(
+  const { rows } = await getDatabasePool().query(
     `SELECT i.id,
             i.asset_code AS "assetCode",
             i.name,
@@ -37,8 +39,9 @@ export async function getCatalogue(
         AND ($1 = '' OR i.name ILIKE '%' || $1 || '%'
                      OR i.asset_code ILIKE '%' || $1 || '%')
         AND ($2 = '' OR c.name = $2)
+        AND i.lab_id = $3
       ORDER BY i.name`,
-    [search, category]
+    [search, category, labId]
   );
   return rows.map((r) => ({ ...r, status: getEquipmentStatusLabel(r.status) }));
 }
