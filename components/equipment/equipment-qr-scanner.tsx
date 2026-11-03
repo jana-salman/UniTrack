@@ -6,13 +6,14 @@ import {
   BrowserQRCodeReader,
   type IScannerControls,
 } from "@zxing/browser";
+import {
+  createEquipmentQrPayload,
+  isValidEquipmentQrPayload,
+} from "@/lib/qr/qr-payload";
 
 type EquipmentQrScannerProps = {
   onScan: (itemId: string) => void;
 };
-
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default function EquipmentQrScanner({
   onScan,
@@ -58,12 +59,14 @@ export default function EquipmentQrScanner({
 
           const scannedText = result.getText().trim();
 
-          if (!UUID_REGEX.test(scannedText)) {
+          if (!isValidEquipmentQrPayload(scannedText)) {
             setError(
               "Invalid equipment QR code. Expected an equipment UUID."
             );
             return;
           }
+
+          const itemId = createEquipmentQrPayload(scannedText);
 
           activeRef.current = false;
           scannerControls.stop();
@@ -73,7 +76,7 @@ export default function EquipmentQrScanner({
           setIsStarting(false);
           setError(null);
 
-          onScan(scannedText);
+          onScan(itemId);
         }
       );
 
