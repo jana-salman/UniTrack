@@ -1,7 +1,5 @@
 
-import {
-  validateStatusChange,
-} from "./equipment-status-change.ts";
+import { validateStatusChange } from "./equipment-status-change.ts";
 
 export interface StatusDatabaseClient {
   query(
@@ -15,9 +13,14 @@ export async function updateEquipmentStatus(
   itemId: string,
   newStatus: string,
   changedBy: string,
+  labId: number,
   reason?: string
 ) {
   const input = validateStatusChange(itemId, newStatus, reason);
+
+  if (!Number.isInteger(labId) || labId <= 0) {
+    throw new Error("Invalid laboratory ID");
+  }
 
   await db.query("BEGIN");
 
@@ -25,29 +28,32 @@ export async function updateEquipmentStatus(
     const result = await db.query(
       `SELECT id, lab_id, status
        FROM public.equipment_items
-       WHERE id = $1
+       WHERE id = $1 AND lab_id = $2
        FOR UPDATE`,
-      [input.itemId]
+      [input.itemId, labId]
     );
 
     if (result.rows.length === 0) {
-      throw new Error("Equipment item not found");
+      throw new Error("Equipment item not found or access denied");
     }
 
     const item = result.rows[0];
     const oldStatus = item.status as string;
-    const labId = item.lab_id as number;
 
     if (oldStatus === input.newStatus) {
       await db.query("COMMIT");
-      return { itemId: input.itemId, status: oldStatus, changed: false };
+      return {
+        itemId: input.itemId,
+        status: oldStatus,
+        changed: false,
+      };
     }
 
     await db.query(
       `UPDATE public.equipment_items
        SET status = $1
-       WHERE id = $2`,
-      [input.newStatus, input.itemId]
+       WHERE id = $2 AND lab_id = $3`,
+      [input.newStatus, input.itemId, labId]
     );
 
     await db.query(
@@ -66,7 +72,11 @@ export async function updateEquipmentStatus(
 
     await db.query("COMMIT");
 
-    return { itemId: input.itemId, status: input.newStatus, changed: true };
+    return {
+      itemId: input.itemId,
+      status: input.newStatus,
+      changed: true,
+    };
   } catch (error) {
     await db.query("ROLLBACK");
     throw error;
