@@ -1,14 +1,39 @@
+import "server-only";
+
 import { Pool } from "pg";
 
-// One shared connection pool. DATABASE_URL comes from the .env file
-// (never commit it). JS gives you the real value for Supabase.
-const globalForPg = globalThis as unknown as { pgPool?: Pool };
+declare global {
+  var unitrackPgPool: Pool | undefined;
+}
 
-export const pool =
-  globalForPg.pgPool ??
-  new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }, // Supabase needs SSL
+function createPool(): Pool {
+  const connectionString = process.env.DATABASE_URL;
+
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is required for server-side database access.");
+  }
+
+  return new Pool({
+    connectionString,
+    max: 5,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
   });
+}
 
-if (process.env.NODE_ENV !== "production") globalForPg.pgPool = pool;
+export function getDatabasePool(): Pool {
+  globalThis.unitrackPgPool ??= createPool();
+  return globalThis.unitrackPgPool;
+}
+
+// Compatibility: older code imports { pool } from "@/lib/db".
+// It is the same shared pool as getDatabasePool(), created only when first used,
+// so importing this file never fails when DATABASE_URL is missing (for example
+// during the build). New code should call getDatabasePool().
+export const pool: Pool = new Proxy({} as Pool, {
+  get(_target, property) {
+    const realPool = getDatabasePool();
+    const value = Reflect.get(realPool, property, realPool);
+    return typeof value === "function" ? value.bind(realPool) : value;
+  },
+});
