@@ -69,24 +69,29 @@ export default function CatalogueClient() {
     })();
   }, []);
 
-  return (
-    <main style={{ maxWidth: 720, margin: "0 auto", padding: 16 }}>
-      <h1 style={{ fontSize: 24, marginBottom: 12 }}>Equipment catalogue</h1>
+    const field =
+    "min-h-11 rounded-lg border border-gray-300 bg-white px-3 text-base text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600";
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+  return (
+    <div>
+      <h1 className="mb-4 text-2xl font-semibold text-gray-900">
+        Equipment catalogue
+      </h1>
+
+      <div className="mb-4 flex flex-wrap gap-2">
         <input
           type="search"
           placeholder="Search by name"
           aria-label="Search by name"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ flex: "1 1 180px", padding: 10, fontSize: 16 }}
+          className={`${field} flex-1 basis-44`}
         />
         <select
           aria-label="Filter by category"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          style={{ flex: "1 1 140px", padding: 10, fontSize: 16 }}
+          className={`${field} flex-1 basis-36`}
         >
           <option value="">All categories</option>
           {categories.map((c) => (
@@ -97,25 +102,31 @@ export default function CatalogueClient() {
         </select>
       </div>
 
-      {error && <p role="alert" style={{ color: "#991b1b" }}>{error}</p>}
-      {loading && !error && <p>Loading…</p>}
-      {!loading && !error && items.length === 0 && <p>No equipment found.</p>}
+      {error && (
+        <p role="alert" className="text-red-600">
+          {error}
+        </p>
+      )}
+      {loading && !error && <p className="text-gray-700">Loading…</p>}
+      {!loading && !error && items.length === 0 && (
+        <p className="text-gray-700">No equipment found.</p>
+      )}
 
-      <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 10 }}>
+      <ul className="grid gap-3 sm:grid-cols-2">
         {items.map((item) => (
           <li
             key={item.id}
-            style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: 12 }}
+            className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-              <strong>{item.name}</strong>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <strong className="text-gray-900">{item.name}</strong>
               <StatusBadge status={item.status} />
             </div>
-            <div style={{ color: "#4b5563", fontSize: 14, marginTop: 4 }}>
+            <div className="mt-1 text-sm text-gray-600">
               {item.assetCode} · {item.category}
             </div>
             {item.expectedReturn && (
-              <div style={{ fontSize: 14, marginTop: 4 }}>
+              <div className="mt-1 text-sm text-gray-900">
                 Expected return:{" "}
                 {new Date(item.expectedReturn).toLocaleDateString("en-GB", {
                   day: "numeric",
@@ -127,6 +138,6 @@ export default function CatalogueClient() {
           </li>
         ))}
       </ul>
-    </main>
+    </div>
   );
 }
