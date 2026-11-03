@@ -34,4 +34,3 @@ export function isValidEquipmentStatus(
     (validStatus) => validStatus === status
   );
 }
-
