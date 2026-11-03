@@ -15,11 +15,13 @@ export function validateCreateCategoryInput(
 
   // Validate category name
   if (
-    typeof category.name !== "string" ||
-    category.name.trim().length === 0
-  ) {
-    errors.push("Category name is required.");
-  }
+  typeof category.name !== "string" ||
+  category.name.trim().length === 0
+) {
+  errors.push("Category name is required.");
+} else if (category.name.trim().length > 100) {
+  errors.push("Category name must not exceed 100 characters.");
+}
 
   // Validate description
   if (
