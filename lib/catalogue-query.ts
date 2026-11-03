@@ -16,8 +16,8 @@ export type CatalogueItem = {
 //   equipment_categories(id, name, description, is_active, created_at)
 // Retired items have status = 'retired'. We never select created_by or any
 // user column, so no student name can leak.
-// TODO (Sprint 2): the loans table does not exist yet, so expectedReturn is
-// always null. Join loans here when JS creates it.
+//   loans(item_id, due_date, returned_at, ...)  -> active loan = returned_at IS NULL
+// The loans join only reads due_date. borrower_id is never selected.
 export async function getCatalogue(
   search = "",
   category = ""
@@ -28,9 +28,11 @@ export async function getCatalogue(
             i.name,
             c.name AS category,
             i.status,
-            NULL::date AS "expectedReturn"
+            l.due_date AS "expectedReturn"
        FROM equipment_items i
        JOIN equipment_categories c ON c.id = i.category_id
+       LEFT JOIN loans l
+              ON l.item_id = i.id AND l.returned_at IS NULL
       WHERE i.status <> 'retired'
         AND ($1 = '' OR i.name ILIKE '%' || $1 || '%'
                      OR i.asset_code ILIKE '%' || $1 || '%')

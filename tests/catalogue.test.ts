@@ -5,7 +5,6 @@ const { query } = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock("@/lib/db", () => ({ pool: { query } }));
 
 import { getCatalogue } from "@/lib/catalogue-query";
-import { getMockCatalogue } from "@/lib/mock-items"; // delete this import and its tests with mock-items.ts
 
 beforeEach(() => query.mockReset());
 
@@ -70,26 +69,5 @@ describe("catalogue query (S1-12)", () => {
     });
     const labels = (await getCatalogue()).map((i) => i.status);
     expect(labels).toEqual(["Borrowed", "Under Repair", "Inspection Required"]);
-  });
-});
-
-describe("sample data filter (temporary)", () => {
-  it("finds items by name, ignoring upper and lower case", () => {
-    const names = getMockCatalogue("CAMERA").map((i) => i.name);
-    expect(names).toEqual(["Camera Canon"]);
-  });
-
-  it("finds items by category", () => {
-    const result = getMockCatalogue("", "Sensors");
-    expect(result.length).toBe(2);
-    expect(result.every((i) => i.category === "Sensors")).toBe(true);
-  });
-
-  it("has no borrower field on any item", () => {
-    for (const item of getMockCatalogue()) {
-      expect(Object.keys(item).sort()).toEqual(
-        ["assetCode", "category", "expectedReturn", "id", "name", "status"]
-      );
-    }
   });
 });
