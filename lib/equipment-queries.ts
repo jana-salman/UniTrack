@@ -101,3 +101,37 @@ export function buildUpdateEquipmentQuery(
 
   return { text, values };
 }
+
+
+
+export type EquipmentDatabase = {
+  query: (
+    sql: string,
+    values: unknown[]
+  ) => Promise<{ rows: Record<string, unknown>[] }>;
+};
+
+export async function createEquipment(
+  db: EquipmentDatabase,
+  item: CreateEquipmentInput,
+  createdBy: string
+) {
+  const query = buildCreateEquipmentQuery(item, createdBy);
+
+  const result = await db.query(query.text, query.values);
+
+  return result.rows[0] ?? null;
+}
+
+export async function updateEquipment(
+  db: EquipmentDatabase,
+  itemId: string,
+  labId: number,
+  item: UpdateEquipmentInput
+) {
+  const query = buildUpdateEquipmentQuery(itemId, labId, item);
+
+  const result = await db.query(query.text, query.values);
+
+  return result.rows[0] ?? null;
+}
