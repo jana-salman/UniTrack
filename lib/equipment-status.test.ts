@@ -1,6 +1,5 @@
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import {
   EQUIPMENT_STATUSES,
   isValidEquipmentStatus,
@@ -8,12 +7,12 @@ import {
 
 test("accepts all database equipment statuses", () => {
   for (const status of EQUIPMENT_STATUSES) {
-    assert.equal(isValidEquipmentStatus(status), true);
+    expect(isValidEquipmentStatus(status)).toBe(true);
   }
 });
 
 test("rejects invalid equipment statuses", () => {
-  assert.equal(isValidEquipmentStatus("Borrowed"), false);
-  assert.equal(isValidEquipmentStatus("broken"), false);
-  assert.equal(isValidEquipmentStatus(""), false);
+  expect(isValidEquipmentStatus("Borrowed")).toBe(false);
+  expect(isValidEquipmentStatus("broken")).toBe(false);
+  expect(isValidEquipmentStatus("")).toBe(false);
 });

@@ -1,6 +1,5 @@
 
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import {
   updateEquipmentStatus,
   type StatusDatabaseClient,
@@ -37,10 +36,7 @@ function createMockDatabase(
         };
       }
 
-      if (
-        options.failOnInsert &&
-        trimmedSql.startsWith("INSERT")
-      ) {
+      if (options.failOnInsert && trimmedSql.startsWith("INSERT")) {
         throw new Error("History insert failed");
       }
 
@@ -63,16 +59,16 @@ test("updates status and records history", async () => {
     "Needs repair"
   );
 
-  assert.equal(result.changed, true);
-  assert.equal(result.status, "under_maintenance");
+  expect(result.changed).toBe(true);
+  expect(result.status).toBe("under_maintenance");
 
   const update = queries.find((q) => q.sql.startsWith("UPDATE"));
   const insert = queries.find((q) => q.sql.startsWith("INSERT"));
 
-  assert.ok(update);
-  assert.ok(insert);
-  assert.deepEqual(update.values, ["under_maintenance", itemId, labId]);
-  assert.deepEqual(insert.values, [
+  expect(update).toBeDefined();
+  expect(insert).toBeDefined();
+  expect(update?.values).toEqual(["under_maintenance", itemId, labId]);
+  expect(insert?.values).toEqual([
     itemId,
     labId,
     "available",
@@ -80,7 +76,7 @@ test("updates status and records history", async () => {
     userId,
     "Needs repair",
   ]);
-  assert.equal(queries.at(-1)?.sql, "COMMIT");
+  expect(queries.at(-1)?.sql).toBe("COMMIT");
 });
 
 test("does not record history when status is unchanged", async () => {
@@ -94,10 +90,10 @@ test("does not record history when status is unchanged", async () => {
     labId
   );
 
-  assert.equal(result.changed, false);
-  assert.equal(queries.some((q) => q.sql.startsWith("UPDATE")), false);
-  assert.equal(queries.some((q) => q.sql.startsWith("INSERT")), false);
-  assert.equal(queries.at(-1)?.sql, "COMMIT");
+  expect(result.changed).toBe(false);
+  expect(queries.some((q) => q.sql.startsWith("UPDATE"))).toBe(false);
+  expect(queries.some((q) => q.sql.startsWith("INSERT"))).toBe(false);
+  expect(queries.at(-1)?.sql).toBe("COMMIT");
 });
 
 test("rolls back when history insertion fails", async () => {
@@ -105,12 +101,11 @@ test("rolls back when history insertion fails", async () => {
     failOnInsert: true,
   });
 
-  await assert.rejects(
-    updateEquipmentStatus(db, itemId, "checked_out", userId, labId),
-    /History insert failed/
-  );
+  await expect(
+    updateEquipmentStatus(db, itemId, "checked_out", userId, labId)
+  ).rejects.toThrow("History insert failed");
 
-  assert.equal(queries.at(-1)?.sql, "ROLLBACK");
+  expect(queries.at(-1)?.sql).toBe("ROLLBACK");
 });
 
 test("rejects equipment belonging to another laboratory", async () => {
@@ -118,25 +113,23 @@ test("rejects equipment belonging to another laboratory", async () => {
     itemLabId: 2,
   });
 
-  await assert.rejects(
-    updateEquipmentStatus(db, itemId, "retired", userId, labId),
-    /Equipment item not found or access denied/
-  );
+  await expect(
+    updateEquipmentStatus(db, itemId, "retired", userId, labId)
+  ).rejects.toThrow("Equipment item not found or access denied");
 
-  assert.equal(queries.some((q) => q.sql.startsWith("UPDATE")), false);
-  assert.equal(queries.some((q) => q.sql.startsWith("INSERT")), false);
-  assert.equal(queries.at(-1)?.sql, "ROLLBACK");
+  expect(queries.some((q) => q.sql.startsWith("UPDATE"))).toBe(false);
+  expect(queries.some((q) => q.sql.startsWith("INSERT"))).toBe(false);
+  expect(queries.at(-1)?.sql).toBe("ROLLBACK");
 });
 
 test("rejects invalid laboratory IDs", async () => {
   const { db, queries } = createMockDatabase("available");
 
-  await assert.rejects(
-    updateEquipmentStatus(db, itemId, "checked_out", userId, 0),
-    /Invalid laboratory ID/
-  );
+  await expect(
+    updateEquipmentStatus(db, itemId, "checked_out", userId, 0)
+  ).rejects.toThrow("Invalid laboratory ID");
 
-  assert.equal(queries.length, 0);
+  expect(queries.length).toBe(0);
 });
 
 test("rejects nonexistent equipment", async () => {
@@ -144,10 +137,9 @@ test("rejects nonexistent equipment", async () => {
     itemExists: false,
   });
 
-  await assert.rejects(
-    updateEquipmentStatus(db, itemId, "retired", userId, labId),
-    /Equipment item not found or access denied/
-  );
+  await expect(
+    updateEquipmentStatus(db, itemId, "retired", userId, labId)
+  ).rejects.toThrow("Equipment item not found or access denied");
 
-  assert.equal(queries.at(-1)?.sql, "ROLLBACK");
+  expect(queries.at(-1)?.sql).toBe("ROLLBACK");
 });
