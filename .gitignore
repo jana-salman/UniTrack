@@ -9,3 +9,10 @@ node_modules/
 # Next.js build files
 .next/
 out/
+build/
+next-env.d.ts
+*.tsbuildinfo
+.vercel
+.DS_Store
+npm-debug.log*
+.env.local
