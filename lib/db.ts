@@ -25,3 +25,15 @@ export function getDatabasePool(): Pool {
   globalThis.unitrackPgPool ??= createPool();
   return globalThis.unitrackPgPool;
 }
+
+// Compatibility: older code imports { pool } from "@/lib/db".
+// It is the same shared pool as getDatabasePool(), created only when first used,
+// so importing this file never fails when DATABASE_URL is missing (for example
+// during the build). New code should call getDatabasePool().
+export const pool: Pool = new Proxy({} as Pool, {
+  get(_target, property) {
+    const realPool = getDatabasePool();
+    const value = Reflect.get(realPool, property, realPool);
+    return typeof value === "function" ? value.bind(realPool) : value;
+  },
+});
