@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   EQUIPMENT_STATUSES,
   isValidEquipmentStatus,
-} from "./equipment-status.ts";
+} from "./equipment-status";
 
 test("accepts all database equipment statuses", () => {
   for (const status of EQUIPMENT_STATUSES) {

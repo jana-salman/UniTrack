@@ -2,7 +2,7 @@
 import {
   isValidEquipmentStatus,
   type EquipmentStatus,
-} from "./equipment-status.ts";
+} from "./equipment-status";
 
 export interface StatusChangeInput {
   itemId: string;

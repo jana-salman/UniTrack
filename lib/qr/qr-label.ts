@@ -1,5 +1,5 @@
 
-import { createEquipmentQrPayload } from "./qr-payload.ts";
+import { createEquipmentQrPayload } from "./qr-payload";
 
 export interface EquipmentQrLabel {
   name: string;

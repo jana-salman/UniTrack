@@ -1,5 +1,5 @@
 
-import { validateStatusChange } from "./equipment-status-change.ts";
+import { validateStatusChange } from "./equipment-status-change";
 
 export interface StatusDatabaseClient {
   query(
