@@ -1,10 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextResponse, connection } from "next/server";
 import { requireRole } from "@/lib/auth/authorization";
 import { AuthorizationError } from "@/lib/auth/errors";
 import { getDatabasePool } from "@/lib/db";
 import { listEquipment } from "@/lib/equipment-queries";
 
 export async function GET() {
+  await connection();
+
   try {
     // Only Lab Managers can access this endpoint.
     const manager = await requireRole(["lab_manager"]);
