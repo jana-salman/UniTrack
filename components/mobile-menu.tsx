@@ -9,7 +9,7 @@ export function MobileMenu({ links }: { links: NavLink[] }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="sm:hidden">
+    <div className="md:hidden">
       <button
         type="button"
         aria-expanded={open}
