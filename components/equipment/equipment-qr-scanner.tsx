@@ -21,10 +21,12 @@ export default function EquipmentQrScanner({
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
   const activeRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const [isScanning, setIsScanning] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [manualId, setManualId] = useState("");
 
   function stopScanner() {
     activeRef.current = false;
@@ -33,6 +35,23 @@ export default function EquipmentQrScanner({
 
     setIsScanning(false);
     setIsStarting(false);
+  }
+
+  function handleManualSubmit() {
+    const enteredId = manualId.trim();
+
+    if (!isValidEquipmentQrPayload(enteredId)) {
+      setError(
+        "Invalid equipment UUID. Enter a valid equipment ID."
+      );
+      return;
+    }
+
+    const itemId = createEquipmentQrPayload(enteredId);
+
+    stopScanner();
+    setError(null);
+    onScan(itemId);
   }
 
   async function startScanner() {
@@ -45,7 +64,7 @@ export default function EquipmentQrScanner({
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error(
-          "Camera access is unavailable. Use localhost or HTTPS."
+          "Camera access is unavailable. Use HTTPS or enter the equipment UUID manually."
         );
       }
 
@@ -80,7 +99,7 @@ export default function EquipmentQrScanner({
         }
       );
 
-      if (!activeRef.current) {
+      if (!activeRef.current || !mountedRef.current) {
         controls.stop();
         return;
       }
@@ -90,6 +109,11 @@ export default function EquipmentQrScanner({
       setIsStarting(false);
     } catch (err) {
       activeRef.current = false;
+      controlsRef.current?.stop();
+      controlsRef.current = null;
+
+      if (!mountedRef.current) return;
+
       setIsScanning(false);
       setIsStarting(false);
 
@@ -99,25 +123,30 @@ export default function EquipmentQrScanner({
           err.name === "PermissionDeniedError")
       ) {
         setError(
-          "Camera permission was denied. Allow camera access and try again."
+          "Camera permission was denied. You can enter the equipment UUID manually below."
         );
       } else if (
         err instanceof DOMException &&
         err.name === "NotFoundError"
       ) {
-        setError("No camera was found on this device.");
+        setError(
+          "No camera was found. Enter the equipment UUID manually below."
+        );
       } else {
         setError(
           err instanceof Error
             ? err.message
-            : "Unable to start the camera."
+            : "Unable to start the camera. Enter the UUID manually."
         );
       }
     }
   }
 
   useEffect(() => {
+    mountedRef.current = true;
+
     return () => {
+      mountedRef.current = false;
       activeRef.current = false;
       controlsRef.current?.stop();
       controlsRef.current = null;
@@ -164,7 +193,8 @@ export default function EquipmentQrScanner({
           minHeight: "200px",
           backgroundColor: "#111827",
           borderRadius: "8px",
-          display: isScanning || isStarting ? "block" : "none",
+          display:
+            isScanning || isStarting ? "block" : "none",
         }}
       />
 
@@ -213,6 +243,89 @@ export default function EquipmentQrScanner({
             Start Scanner
           </button>
         )}
+      </div>
+
+      <div
+        style={{
+          marginTop: "24px",
+          paddingTop: "20px",
+          borderTop: "1px solid #d1d5db",
+        }}
+      >
+        <h3
+          style={{
+            fontSize: "16px",
+            fontWeight: 600,
+            marginBottom: "8px",
+          }}
+        >
+          Enter Equipment UUID Manually
+        </h3>
+
+        <p
+          style={{
+            fontSize: "14px",
+            color: "#4b5563",
+            marginBottom: "12px",
+          }}
+        >
+          If you cannot use the camera, enter the
+          equipment UUID below.
+        </p>
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            handleManualSubmit();
+          }}
+        >
+          <label
+            htmlFor="manual-equipment-uuid"
+            style={{
+              display: "block",
+              fontSize: "14px",
+              fontWeight: 600,
+              marginBottom: "6px",
+            }}
+          >
+            Equipment UUID
+          </label>
+
+          <input
+            id="manual-equipment-uuid"
+            type="text"
+            value={manualId}
+            onChange={(event) =>
+              setManualId(event.target.value)
+            }
+            placeholder="Enter equipment UUID"
+            autoComplete="off"
+            spellCheck={false}
+            style={{
+              width: "100%",
+              padding: "10px",
+              border: "1px solid #9ca3af",
+              borderRadius: "6px",
+              boxSizing: "border-box",
+              fontSize: "14px",
+            }}
+          />
+
+          <button
+            type="submit"
+            style={{
+              marginTop: "12px",
+              padding: "10px 16px",
+              backgroundColor: "#1d4ed8",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+            }}
+          >
+            Submit Equipment UUID
+          </button>
+        </form>
       </div>
     </div>
   );
