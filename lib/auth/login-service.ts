@@ -50,8 +50,9 @@ export async function authenticateWithPassword(
   let user: LoginUser | null;
   try {
     user = await dependencies.signIn(normalizedEmail, password);
-  } catch {
-    return unavailable();
+  } catch (error) {
+     logLoginError("signIn", error);
+     return unavailable();
   }
 
   if (!user) {
@@ -61,9 +62,9 @@ export async function authenticateWithPassword(
   let profile: Profile | null;
   try {
     profile = await dependencies.findProfile(user.id);
-  } catch {
-    await dependencies.signOut();
-    return unavailable();
+  } catch (error) {
+     logLoginError("signIn", error);
+     return unavailable();
   }
 
   const authenticatedEmail = normalizeEmail(user.email ?? "");
@@ -101,3 +102,17 @@ function unavailable(): LoginResult {
     "University login is temporarily unavailable. Try again later.",
   );
 }
+
+  function logLoginError(step: "signIn" | "findProfile", error: unknown) {
+    const details = error as {
+      name?: string;
+      message?: string;
+      code?: string;
+    } | null;
+
+    console.error(`login: ${step} failed`, {
+      name: details?.name,
+      code: details?.code,
+      message: details?.message,
+    });
+  }
