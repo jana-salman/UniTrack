@@ -135,3 +135,40 @@ export async function updateEquipment(
 
   return result.rows[0] ?? null;
 }
+
+export function buildListEquipmentQuery(labId: number) {
+  const text = `
+    SELECT
+      id,
+      asset_code,
+      name,
+      description,
+      serial_number,
+      category_id,
+      lab_id,
+      condition,
+      is_restricted,
+      status,
+      created_at,
+      updated_at
+    FROM public.equipment_items
+    WHERE lab_id = $1
+    ORDER BY created_at DESC;
+  `;
+
+  return {
+    text,
+    values: [labId],
+  };
+}
+
+export async function listEquipment(
+  db: EquipmentDatabase,
+  labId: number
+): Promise<Record<string, unknown>[]> {
+  const query = buildListEquipmentQuery(labId);
+
+  const result = await db.query(query.text, query.values);
+
+  return result.rows;
+}
