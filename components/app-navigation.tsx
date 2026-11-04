@@ -6,13 +6,18 @@ import { roleLabel, type Profile } from "@/lib/auth/model";
 
 export function AppNavigation({ profile }: { profile: Profile }) {
   const canScan = profile.role !== "student";
+  const isManager = profile.role === "lab_manager";
 
   const navigation: NavLink[] = [
     { href: "/dashboard", label: "Dashboard" },
     { href: "/catalogue", label: "Catalogue" },
     ...(canScan ? [{ href: "/scan", label: "Scan" }] : []),
-    ...(profile.role === "lab_manager"
-      ? [{ href: "/manager/users", label: "Manage roles" }]
+    ...(isManager
+      ? [
+          { href: "/manager/equipment", label: "Equipment" },
+          { href: "/manager/categories", label: "Categories" },
+          { href: "/manager/users", label: "Manage roles" },
+        ]
       : []),
   ];
 
@@ -23,7 +28,7 @@ export function AppNavigation({ profile }: { profile: Profile }) {
         UniTrack
       </Link>
 
-      <nav aria-label="Primary navigation" className="hidden gap-1 sm:flex sm:flex-1">
+      <nav aria-label="Primary navigation" className="hidden gap-1 md:flex md:flex-1">
         {navigation.map((item) => (
           <Link className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-blue-50 hover:text-blue-700" href={item.href} key={item.href}>
             {item.label}
@@ -32,7 +37,7 @@ export function AppNavigation({ profile }: { profile: Profile }) {
       </nav>
 
       <div className="ml-auto flex items-center gap-3 text-right">
-        <div className="hidden sm:grid">
+        <div className="hidden md:grid">
           <strong className="text-sm text-slate-900">{profile.full_name}</strong>
           <span className="text-xs text-slate-500">{roleLabel(profile.role)}</span>
         </div>
