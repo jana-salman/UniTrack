@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import StatusBadge from "@/components/StatusBadge";
+import { useRouter } from "next/navigation";
 
 type Item = {
   id: string;
@@ -15,6 +16,7 @@ type Item = {
 const REFRESH_MS = 30_000; // refresh every 30 s, so changes show within 1 minute
 
 export default function CatalogueClient() {
+  const router = useRouter();
   const [items, setItems] = useState<Item[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [search, setSearch] = useState("");
@@ -28,7 +30,7 @@ export default function CatalogueClient() {
       const params = new URLSearchParams({ search, category });
       const res = await fetch(`/api/items?${params}`);
       if (res.status === 401) {
-        window.location.href = "/login"; // session ended
+           router.replace("/login"); // session ended
         return;
       }
       if (!res.ok) throw new Error("bad response");
@@ -39,7 +41,7 @@ export default function CatalogueClient() {
     } finally {
       setLoading(false);
     }
-  }, [search, category]);
+  }, [search, category, router]);
 
   useEffect(() => {
     const t = setTimeout(loadItems, 300); // small delay while typing
