@@ -1,24 +1,29 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import NavBar from "@/components/NavBar";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
 
 export const metadata: Metadata = {
   title: "UniTrack",
-  description: "University equipment borrowing and management system",
+  description: "University equipment borrowing and management",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en">
-      <body>
-        <Suspense
-          fallback={<div className="h-[57px] border-b border-gray-200 bg-white" />}
-        >
-          <NavBar role="student" />
-        </Suspense>
-        <main className="mx-auto w-full max-w-5xl px-4 py-6">{children}</main>
-      </body>
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+    >
+      <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
 }
