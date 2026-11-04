@@ -37,6 +37,17 @@ export default function EquipmentQrLabel({
     const labelHtml = labelRef.current.outerHTML;
 
     printWindow.document.open();
+
+    // Register the listener before the document finishes loading.
+    printWindow.addEventListener(
+      "load",
+      () => {
+        printWindow.focus();
+        printWindow.print();
+      },
+      { once: true }
+    );
+
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
@@ -67,6 +78,10 @@ export default function EquipmentQrLabel({
               body {
                 padding: 0;
               }
+
+              @page {
+                margin: 10mm;
+              }
             }
           </style>
         </head>
@@ -75,12 +90,8 @@ export default function EquipmentQrLabel({
         </body>
       </html>
     `);
-    printWindow.document.close();
 
-    printWindow.onload = () => {
-      printWindow.focus();
-      printWindow.print();
-    };
+    printWindow.document.close();
   }
 
   return (
