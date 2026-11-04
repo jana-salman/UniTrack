@@ -100,3 +100,63 @@ export function validateCreateEquipmentInput(input: unknown): string[] {
   return errors;
 }
 
+export function validateUpdateEquipmentInput(input: unknown): string[] {
+  const errors: string[] = [];
+
+  // Make sure the request contains an object.
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return ["Equipment data must be an object."];
+  }
+
+  const item = input as Record<string, unknown>;
+
+  // Validate equipment name.
+  if (
+    typeof item.name !== "string" ||
+    item.name.trim().length === 0 ||
+    item.name.length > 150
+  ) {
+    errors.push("Equipment name must contain 1 to 150 characters.");
+  }
+
+  // Validate category ID.
+  if (
+    !Number.isInteger(item.category_id) ||
+    (item.category_id as number) <= 0
+  ) {
+    errors.push("A valid category ID is required.");
+  }
+
+  // Validate optional description.
+  if (
+    item.description != null &&
+    typeof item.description !== "string"
+  ) {
+    errors.push("Description must be text.");
+  }
+
+  // Validate optional serial number.
+  if (
+    item.serial_number != null &&
+    (typeof item.serial_number !== "string" ||
+      item.serial_number.length > 100)
+  ) {
+    errors.push("Serial number must be at most 100 characters.");
+  }
+
+  // Validate equipment condition.
+  if (
+    !EQUIPMENT_CONDITIONS.some(
+      (condition) => condition === item.condition
+    )
+  ) {
+    errors.push("Invalid equipment condition.");
+  }
+
+  // Validate restricted status.
+  if (typeof item.is_restricted !== "boolean") {
+    errors.push("is_restricted must be true or false.");
+  }
+
+  return errors;
+}

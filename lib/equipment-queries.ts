@@ -128,7 +128,7 @@ export async function updateEquipment(
   itemId: string,
   labId: number,
   item: UpdateEquipmentInput
-) {
+): Promise<Record<string, unknown> | null> {
   const query = buildUpdateEquipmentQuery(itemId, labId, item);
 
   const result = await db.query(query.text, query.values);
