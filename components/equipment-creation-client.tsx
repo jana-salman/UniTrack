@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-
+import EquipmentQrLabel from "@/components/equipment/equipment-qr-label";
 type Category = {
   id: number;
   name: string;
@@ -290,6 +290,13 @@ export default function EquipmentCreationClient() {
           <p className="mt-2 break-all text-sm text-green-700">
             Equipment UUID: {createdEquipment.id}
           </p>
+          <div className="mt-5 border-t border-green-200 pt-5">
+  <EquipmentQrLabel
+    itemId={createdEquipment.id}
+    name={createdEquipment.name}
+    assetCode={createdEquipment.asset_code}
+  />
+</div>
         </section>
       )}
     </main>

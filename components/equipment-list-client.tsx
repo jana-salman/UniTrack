@@ -14,6 +14,11 @@ type EquipmentItem = {
   is_restricted: boolean;
 };
 
+type Category = {
+  id: number;
+  name: string;
+};
+
 type EditDraft = {
   name: string;
   description: string;
@@ -32,6 +37,11 @@ export default function EquipmentListClient() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState("");
+  const [retiringId, setRetiringId] = useState<string | null>(null);
+  const [retireError, setRetireError] = useState("");
+  const [retireSuccess, setRetireSuccess] = useState("");
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoriesError, setCategoriesError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -74,6 +84,43 @@ export default function EquipmentListClient() {
       active = false;
     };
   }, []);
+  useEffect(() => {
+  let active = true;
+
+  async function loadCategories() {
+    try {
+      const response = await fetch("/api/categories");
+
+      if (!response.ok) {
+        throw new Error("Could not load categories.");
+      }
+
+      const data: unknown = await response.json();
+
+      if (!Array.isArray(data)) {
+        throw new Error("Invalid categories response.");
+      }
+
+      if (active) {
+        setCategories(data as Category[]);
+      }
+    } catch (err) {
+      if (active) {
+        setCategoriesError(
+          err instanceof Error
+            ? err.message
+            : "Could not load categories."
+        );
+      }
+    }
+  }
+
+  void loadCategories();
+
+  return () => {
+    active = false;
+  };
+}, []);
 async function saveEquipmentChanges() {
   if (!selectedEquipmentId || !editDraft || saving) {
     return;
@@ -143,6 +190,75 @@ async function saveEquipmentChanges() {
     setSaving(false);
   }
 }
+async function retireEquipment(item: EquipmentItem) {
+  if (item.status === "retired" || retiringId !== null) {
+    return;
+  }
+
+  const reason = window.prompt(
+    `Retire ${item.name} (${item.asset_code})?\n\nEnter a retirement reason, or click Cancel to keep it active:`
+  );
+
+  if (reason === null) {
+    return;
+  }
+
+  if (!reason.trim()) {
+    setRetireError("Please enter a retirement reason.");
+    setRetireSuccess("");
+    return;
+  }
+
+  setRetiringId(item.id);
+  setRetireError("");
+  setRetireSuccess("");
+
+  try {
+    const response = await fetch(
+      `/api/items/${encodeURIComponent(item.id)}/status`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          status: "retired",
+          reason: reason.trim(),
+        }),
+      }
+    );
+
+    const result: unknown = await response.json();
+
+    if (!response.ok) {
+      const message =
+        typeof result === "object" &&
+        result !== null &&
+        "error" in result &&
+        typeof result.error === "string"
+          ? result.error
+          : "Failed to retire equipment.";
+
+      throw new Error(message);
+    }
+
+    setEquipment((previous) =>
+      previous.map((equipmentItem) =>
+        equipmentItem.id === item.id
+          ? { ...equipmentItem, status: "retired" }
+          : equipmentItem
+      )
+    );
+
+    setRetireSuccess(`${item.asset_code} retired successfully.`);
+  } catch (err) {
+    setRetireError(
+      err instanceof Error ? err.message : "Something went wrong."
+    );
+  } finally {
+    setRetiringId(null);
+  }
+}
   return (
     <section className="mx-auto mt-8 max-w-7xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
       <h2 className="text-2xl font-bold text-slate-900">
@@ -160,6 +276,17 @@ async function saveEquipmentChanges() {
       {error && (
         <p className="mt-6 text-red-600">{error}</p>
       )}
+      {retireError && (
+  <p role="alert" className="mt-4 text-red-600">
+    {retireError}
+  </p>
+)}
+
+{retireSuccess && (
+  <p role="status" className="mt-4 text-green-700">
+    {retireSuccess}
+  </p>
+)}
 
       {!loading && !error && equipment.length === 0 && (
         <p className="mt-6 text-slate-600">
@@ -201,7 +328,43 @@ async function saveEquipmentChanges() {
           className="w-full rounded-lg border border-slate-300 bg-white p-3"
         />
       </label>
+      <label className="block">
+  <span className="mb-2 block font-medium">
+    Category *
+  </span>
 
+  <select
+    value={editDraft.category_id}
+    onChange={(e) =>
+      setEditDraft({
+        ...editDraft,
+        category_id: Number(e.target.value),
+      })
+    }
+    disabled={categories.length === 0}
+    className="w-full rounded-lg border border-slate-300 bg-white p-3"
+  >
+    {!categories.some(
+      (category) => category.id === editDraft.category_id
+    ) && (
+      <option value={editDraft.category_id}>
+        Current Category (ID {editDraft.category_id})
+      </option>
+    )}
+
+    {categories.map((category) => (
+      <option key={category.id} value={category.id}>
+        {category.name}
+      </option>
+    ))}
+  </select>
+</label>
+
+{categoriesError && (
+  <p role="alert" className="text-sm text-red-600">
+    {categoriesError}
+  </p>
+)}
       <label className="block">
         <span className="mb-2 block font-medium">Equipment Condition *</span>
         <select
@@ -321,6 +484,16 @@ async function saveEquipmentChanges() {
   >
     {selectedEquipmentId === item.id ? "Selected" : "Edit"}
   </button>
+  {item.status !== "retired" && (
+  <button
+    type="button"
+    disabled={retiringId !== null}
+    onClick={() => void retireEquipment(item)}
+    className="ml-2 rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+  >
+    {retiringId === item.id ? "Retiring..." : "Retire"}
+  </button>
+)}
 </td>
                 </tr>
               ))}
