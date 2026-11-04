@@ -2,6 +2,7 @@ import "server-only";
 
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { connection } from "next/server";
 
 import { getAllowedEmailDomains, isUniversityEmail, normalizeEmail } from "./email";
 import { AuthorizationError } from "./errors";
@@ -74,6 +75,8 @@ export async function requireRole(
 export async function requirePageProfile(
   roles?: readonly ProfileRole[],
 ): Promise<Profile> {
+  await connection();
+
   try {
     return roles ? await requireRole(roles) : await getAuthenticatedProfile();
   } catch (error) {
