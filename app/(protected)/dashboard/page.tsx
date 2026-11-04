@@ -1,5 +1,6 @@
 import { roleLabel } from "@/lib/auth/model";
 import { requirePageProfile } from "@/lib/auth/authorization";
+import { Suspense } from "react";
 
 const roleContent = {
   student: {
@@ -20,7 +21,7 @@ const roleContent = {
   },
 } as const;
 
-export default async function DashboardPage() {
+async function DashboardContent()  {
   const profile = await requirePageProfile();
   const content = roleContent[profile.role];
 
@@ -54,5 +55,18 @@ export default async function DashboardPage() {
         </article>
       </section>
     </main>
+  );
+}
+export default function DashboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
+          <p className="text-slate-600">Loading your workspace…</p>
+        </main>
+      }
+    >
+      <DashboardContent />
+    </Suspense>
   );
 }
