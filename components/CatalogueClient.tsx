@@ -75,7 +75,7 @@ export default function CatalogueClient() {
     "min-h-11 rounded-lg border border-gray-300 bg-white px-3 text-base text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600";
 
   return (
-    <div>
+      <div className="mx-auto w-full max-w-5xl px-4 py-6">
       <h1 className="mb-4 text-2xl font-semibold text-gray-900">
         Equipment catalogue
       </h1>
