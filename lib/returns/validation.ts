@@ -57,11 +57,18 @@ export function validateReturnInput(value: unknown): ConfirmReturnInput {
     if (notes !== undefined && typeof notes !== "string") {
       throw new Error("Condition notes must be text.");
     }
+    if (
+      record.newDamage !== undefined &&
+      typeof record.newDamage !== "boolean"
+    ) {
+      throw new Error("The new damage check must be true or false.");
+    }
 
     return {
       kitComponentId: componentId,
       conditionStatus: status as ConditionStatus,
       notes: typeof notes === "string" ? notes.trim() : undefined,
+      newDamage: record.newDamage === true,
     };
   });
 

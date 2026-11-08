@@ -31,3 +31,10 @@ export interface ReturnConditionInput {
 export interface ConfirmReturnInput {
   conditions: ReturnConditionInput[];
 }
+
+export interface ReturnConditionInput {
+  kitComponentId: string | null;
+  conditionStatus: ConditionStatus;
+  notes?: string;
+  newDamage?: boolean;
+}
