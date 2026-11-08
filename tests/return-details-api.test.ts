@@ -25,6 +25,16 @@ vi.mock("@/lib/returns/queries", () => ({
   getReturnDetails: mocks.getReturnDetails,
 }));
 
+vi.mock("@/lib/clients/return-equipment-client", () => ({
+  returnEquipmentClient: {},
+}));
+
+vi.mock("@/lib/returns/service", () => ({
+  confirmReturn: vi.fn(),
+}));
+
+vi.mock("server-only", () => ({}));
+
 import { GET } from "@/app/api/returns/[loanId]/route";
 import { AuthorizationError } from "@/lib/auth/errors";
 

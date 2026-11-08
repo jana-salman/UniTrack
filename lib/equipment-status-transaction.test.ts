@@ -143,3 +143,161 @@ test("rejects nonexistent equipment", async () => {
 
   expect(queries.at(-1)?.sql).toBe("ROLLBACK");
 });
+
+test("rejects an unexpected status without changing equipment", async () => {
+  const { db, queries } = createMockDatabase("under_maintenance");
+
+  await expect(
+    updateEquipmentStatus(
+      db,
+      itemId,
+      "available",
+      userId,
+      labId,
+      "Equipment returned",
+      { expectedStatus: ["checked_out", "overdue"] }
+    )
+  ).rejects.toThrow(
+    "Equipment status changed. Reload before trying again."
+  );
+
+  expect(queries.some((q) => q.sql.startsWith("UPDATE"))).toBe(false);
+  expect(queries.some((q) => q.sql.startsWith("INSERT"))).toBe(false);
+  expect(queries.at(-1)?.sql).toBe("ROLLBACK");
+});
+
+function createKeyedMockDatabase() {
+  let currentStatus = "checked_out";
+
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const history: Record<string, unknown>[] = [];
+
+  const db: StatusDatabaseClient = {
+    async query(sql: string, values: unknown[] = []) {
+      const trimmedSql = sql.trim();
+      queries.push({ sql: trimmedSql, values });
+
+      if (
+        trimmedSql.startsWith("SELECT") &&
+        trimmedSql.includes("FROM public.equipment_items")
+      ) {
+        return {
+          rows: [{ id: itemId, lab_id: labId, status: currentStatus }],
+        };
+      }
+
+      if (
+        trimmedSql.startsWith("SELECT") &&
+        trimmedSql.includes("FROM public.equipment_status_history")
+      ) {
+        return {
+          rows: history.filter(
+            (record) => record.request_key === values[0]
+          ),
+        };
+      }
+
+      if (trimmedSql.startsWith("UPDATE")) {
+        currentStatus = values[0] as string;
+      }
+
+      if (trimmedSql.startsWith("INSERT")) {
+        history.push({
+          item_id: values[0],
+          lab_id: values[1],
+          old_status: values[2],
+          new_status: values[3],
+          changed_by: values[4],
+          reason: values[5],
+          request_key: values[6],
+        });
+      }
+
+      return { rows: [] };
+    },
+  };
+
+  return { db, queries, history };
+}
+
+test("saves the request key with the status history", async () => {
+  const { db, history } = createKeyedMockDatabase();
+
+  await updateEquipmentStatus(
+    db,
+    itemId,
+    "available",
+    userId,
+    labId,
+    "Return confirmed",
+    {
+      expectedStatus: ["checked_out"],
+      idempotencyKey: "return-test-1",
+    }
+  );
+
+  expect(history).toHaveLength(1);
+  expect(history[0].request_key).toBe("return-test-1");
+});
+
+test("replays the same request without another update or history row", async () => {
+  const { db, queries, history } = createKeyedMockDatabase();
+
+  const options = {
+    expectedStatus: ["checked_out"],
+    idempotencyKey: "return-test-2",
+  };
+
+  const first = await updateEquipmentStatus(
+    db, itemId, "available", userId, labId,
+    "Return confirmed", options
+  );
+
+  const replay = await updateEquipmentStatus(
+    db, itemId, "available", userId, labId,
+    "Return confirmed", options
+  );
+
+  expect(replay).toEqual(first);
+  expect(history).toHaveLength(1);
+
+  expect(
+    queries.filter((query) => query.sql.startsWith("UPDATE"))
+  ).toHaveLength(1);
+});
+
+test("rejects reusing a key for a different status change", async () => {
+  const { db, history } = createKeyedMockDatabase();
+
+  await updateEquipmentStatus(
+    db, itemId, "available", userId, labId,
+    "Return confirmed",
+    { idempotencyKey: "return-test-3" }
+  );
+
+  await expect(
+    updateEquipmentStatus(
+      db, itemId, "inspection_required", userId, labId,
+      "Damage reported",
+      { idempotencyKey: "return-test-3" }
+    )
+  ).rejects.toThrow(
+    "Idempotency key was already used for a different status change"
+  );
+
+  expect(history).toHaveLength(1);
+});
+
+test("rejects an empty request key before starting a transaction", async () => {
+  const { db, queries } = createKeyedMockDatabase();
+
+  await expect(
+    updateEquipmentStatus(
+      db, itemId, "available", userId, labId,
+      "Return confirmed",
+      { idempotencyKey: "   " }
+    )
+  ).rejects.toThrow("Idempotency key cannot be empty");
+
+  expect(queries).toHaveLength(0);
+});

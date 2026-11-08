@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
+import ReturnActions from "./return-actions";
 import type {
   ConditionStatus,
   PickupCondition,
@@ -171,6 +171,13 @@ export default function ReturnDetails({
           </ul>
         )}
       </div>
+      {loan.returned_at === null && pickupConditions.length > 0 && (
+        <ReturnActions
+          key={loan.id}
+          loanId={loan.id}
+          pickupConditions={pickupConditions}
+        />
+      )}
     </section>
   );
 }

@@ -1,4 +1,3 @@
-
 import { validateStatusChange } from "./equipment-status-change";
 
 export interface StatusDatabaseClient {
@@ -8,20 +7,37 @@ export interface StatusDatabaseClient {
   ): Promise<{ rows: Record<string, unknown>[] }>;
 }
 
+export interface StatusChangeOptions {
+  expectedStatus?: readonly string[];
+  idempotencyKey?: string;
+}
+
+export class EquipmentStatusConflictError extends Error {
+  constructor() {
+    super("Equipment status changed. Reload before trying again.");
+    this.name = "EquipmentStatusConflictError";
+  }
+}
+
 export async function updateEquipmentStatus(
   db: StatusDatabaseClient,
   itemId: string,
   newStatus: string,
   changedBy: string,
   labId: number,
-  reason?: string
+  reason?: string,
+  options: StatusChangeOptions = {}
 ) {
   const input = validateStatusChange(itemId, newStatus, reason);
 
   if (!Number.isInteger(labId) || labId <= 0) {
     throw new Error("Invalid laboratory ID");
   }
+  const requestKey = options.idempotencyKey?.trim();
 
+  if (options.idempotencyKey !== undefined && !requestKey) {
+    throw new Error("Idempotency key cannot be empty");
+  }
   await db.query("BEGIN");
 
   try {
@@ -39,6 +55,44 @@ export async function updateEquipmentStatus(
 
     const item = result.rows[0];
     const oldStatus = item.status as string;
+    if (requestKey) {
+      const previous = await db.query(
+        `SELECT item_id, lab_id, new_status, changed_by, reason
+         FROM public.equipment_status_history
+         WHERE request_key = $1`,
+        [requestKey]
+      );
+
+      const saved = previous.rows[0];
+
+      if (saved) {
+        if (
+          saved.item_id !== input.itemId ||
+          saved.lab_id !== labId ||
+          saved.new_status !== input.newStatus ||
+          saved.changed_by !== changedBy ||
+          saved.reason !== (input.reason ?? null)
+        ) {
+          throw new Error(
+            "Idempotency key was already used for a different status change"
+          );
+        }
+
+        await db.query("COMMIT");
+
+        return {
+          itemId: input.itemId,
+          status: saved.new_status as string,
+          changed: true,
+        };
+      }
+    }
+    if (
+      options.expectedStatus !== undefined &&
+      !options.expectedStatus.includes(oldStatus)
+    ) {
+      throw new EquipmentStatusConflictError();
+    }
 
     if (oldStatus === input.newStatus) {
       await db.query("COMMIT");
@@ -56,19 +110,37 @@ export async function updateEquipmentStatus(
       [input.newStatus, input.itemId, labId]
     );
 
-    await db.query(
-      `INSERT INTO public.equipment_status_history
-       (item_id, lab_id, old_status, new_status, changed_by, reason)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
-        input.itemId,
-        labId,
-        oldStatus,
-        input.newStatus,
-        changedBy,
-        input.reason ?? null,
-      ]
-    );
+    if (requestKey) {
+      await db.query(
+        `INSERT INTO public.equipment_status_history
+         (item_id, lab_id, old_status, new_status,
+          changed_by, reason, request_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          input.itemId,
+          labId,
+          oldStatus,
+          input.newStatus,
+          changedBy,
+          input.reason ?? null,
+          requestKey,
+        ]
+      );
+    } else {
+      await db.query(
+        `INSERT INTO public.equipment_status_history
+         (item_id, lab_id, old_status, new_status, changed_by, reason)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          input.itemId,
+          labId,
+          oldStatus,
+          input.newStatus,
+          changedBy,
+          input.reason ?? null,
+        ]
+      );
+    }
 
     await db.query("COMMIT");
 
@@ -82,3 +154,4 @@ export async function updateEquipmentStatus(
     throw error;
   }
 }
+
