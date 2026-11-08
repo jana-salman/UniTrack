@@ -12,6 +12,7 @@ export type EquipmentStatus =
 
 export interface ReturnEquipmentItem {
   id: string;
+  name: string;
   labId: number;
   status: EquipmentStatus;
 }
@@ -35,6 +36,11 @@ export interface ReturnEquipmentPort {
   changeStatus(
     input: ReturnStatusChange,
   ): Promise<{ changed: boolean }>;
+
+  getComponents(
+    itemId: string,
+    labId: number,
+  ): Promise<ReturnEquipmentComponent[]>;
 }
 
 export interface ReturnOutcome {
@@ -42,4 +48,9 @@ export interface ReturnOutcome {
   returnedAt: string;
   status: ReturnStatus;
   isLate: boolean;
+}
+
+export interface ReturnEquipmentComponent {
+  id: string;
+  name: string;
 }

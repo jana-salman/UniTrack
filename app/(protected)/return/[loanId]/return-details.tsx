@@ -20,6 +20,13 @@ type LoanResponse = Omit<
 interface ReturnDetailsResponse {
   loan: LoanResponse;
   pickupConditions: PickupCondition[];
+  equipment: {
+    name: string;
+    components: {
+      id: string;
+      name: string;
+    }[];
+  };
 }
 
 type LoadState =
@@ -106,7 +113,14 @@ export default function ReturnDetails({
     );
   }
 
-  const { loan, pickupConditions } = state.data;
+  const { loan, pickupConditions, equipment } = state.data;
+
+  const componentNames = Object.fromEntries(
+    equipment.components.map((component) => [
+      component.id,
+      component.name,
+    ]),
+  );
 
   return (
     <section className="max-w-3xl space-y-6">
@@ -114,6 +128,9 @@ export default function ReturnDetails({
         <h2 className="text-xl font-semibold text-slate-950">
           Loan details
         </h2>
+        <p className="mt-2 font-medium text-slate-700">
+          {equipment.name}
+        </p>
 
         <dl className="mt-4 space-y-3 text-slate-700">
           <div>
@@ -153,8 +170,9 @@ export default function ReturnDetails({
               >
                 <h3 className="font-semibold text-slate-950">
                   {record.kit_component_id === null
-                    ? "Main equipment item"
-                    : `Kit component ${index + 1}`}
+                  ? equipment.name
+                  : componentNames[record.kit_component_id] ??
+                    `Kit component ${index + 1}`}
                 </h3>
 
                 <p className="mt-1 text-slate-700">
@@ -176,6 +194,8 @@ export default function ReturnDetails({
           key={loan.id}
           loanId={loan.id}
           pickupConditions={pickupConditions}
+          equipmentName={equipment.name}
+          componentNames={componentNames}
         />
       )}
     </section>

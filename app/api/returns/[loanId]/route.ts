@@ -48,11 +48,31 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(details, {
-      headers: {
-        "Cache-Control": "private, no-store",
+    const [item, components] = await Promise.all([
+      returnEquipmentClient.getItem(
+        details.loan.item_id,
+        user.lab_id,
+      ),
+      returnEquipmentClient.getComponents(
+        details.loan.item_id,
+        user.lab_id,
+      ),
+    ]);
+
+    return NextResponse.json(
+      {
+        ...details,
+        equipment: {
+          name: item?.name ?? "Equipment name unavailable",
+          components,
+        },
       },
-    });
+      {
+        headers: {
+          "Cache-Control": "private, no-store",
+        },
+      },
+    );
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return NextResponse.json(

@@ -12,11 +12,15 @@ import ReturnForm from "./return-form";
 interface ReturnActionsProps {
   loanId: string;
   pickupConditions: PickupCondition[];
+  equipmentName: string;
+  componentNames: Record<string, string>;
 }
 
 export default function ReturnActions({
   loanId,
   pickupConditions,
+  equipmentName,
+  componentNames,
 }: ReturnActionsProps) {
   const [result, setResult] = useState<ReturnOutcome | null>(null);
   const [blocked, setBlocked] = useState(false);
@@ -118,6 +122,8 @@ export default function ReturnActions({
       <ReturnForm
         pickupConditions={pickupConditions}
         onConfirm={handleConfirm}
+        equipmentName={equipmentName}
+        componentNames={componentNames}
       />
     </div>
   );

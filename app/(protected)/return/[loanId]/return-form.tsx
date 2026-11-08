@@ -13,11 +13,15 @@ import type {
 interface ReturnFormProps {
   pickupConditions: PickupCondition[];
   onConfirm: (input: ConfirmReturnInput) => Promise<void>;
+  equipmentName: string;
+  componentNames: Record<string, string>;
 }
 
 export default function ReturnForm({
   pickupConditions,
   onConfirm,
+  equipmentName,
+  componentNames,
 }: ReturnFormProps) {
   const componentIds = [
     ...new Set(
@@ -87,8 +91,9 @@ export default function ReturnForm({
           const key = componentId ?? "main";
           const label =
             componentId === null
-              ? "Main equipment item"
-              : `Kit component ${index}`;
+              ? equipmentName
+              : componentNames[componentId] ??
+                `Kit component ${index}`;
 
           return (
             <div

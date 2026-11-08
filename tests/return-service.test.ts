@@ -68,6 +68,7 @@ const input = {
 
 const equipment = {
   getItem: mocks.getItem,
+  getComponents: vi.fn().mockResolvedValue([]),
   changeStatus: mocks.changeStatus,
 };
 

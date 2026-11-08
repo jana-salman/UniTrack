@@ -3,6 +3,8 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   requireRole: vi.fn(),
   getReturnDetails: vi.fn(),
+  getItem: vi.fn(),
+  getComponents: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/authorization", () => ({
@@ -26,7 +28,10 @@ vi.mock("@/lib/returns/queries", () => ({
 }));
 
 vi.mock("@/lib/clients/return-equipment-client", () => ({
-  returnEquipmentClient: {},
+  returnEquipmentClient: {
+    getItem: mocks.getItem,
+    getComponents: mocks.getComponents,
+  },
 }));
 
 vi.mock("@/lib/returns/service", () => ({
@@ -58,11 +63,28 @@ beforeEach(() => {
     role: "lab_assistant",
     lab_id: 1,
   });
+
+  mocks.getItem.mockResolvedValue({
+    id: "demo-item-id",
+    name: "Demo camera kit",
+    labId: 1,
+    status: "checked_out",
+  });
+
+  mocks.getComponents.mockResolvedValue([
+    { id: "charger-id", name: "Charger" },
+  ]);
 });
+  
 
 test("returns loan details for an authorized lab assistant", async () => {
-  const details = {
-    loan: { id: loanId, lab_id: 1, returned_at: null },
+    const details = {
+    loan: {
+      id: loanId,
+      item_id: "demo-item-id",
+      lab_id: 1,
+      returned_at: null,
+    },
     pickupConditions: [],
   };
 
@@ -71,7 +93,18 @@ test("returns loan details for an authorized lab assistant", async () => {
   const response = await GET(makeRequest(), makeContext());
 
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual(details);
+  expect(await response.json()).toEqual({
+    ...details,
+    equipment: {
+      name: "Demo camera kit",
+      components: [
+        { id: "charger-id", name: "Charger" },
+      ],
+    },
+  });
+
+  expect(mocks.getItem).toHaveBeenCalledWith("demo-item-id", 1);
+  expect(mocks.getComponents).toHaveBeenCalledWith("demo-item-id", 1);
   expect(mocks.requireRole).toHaveBeenCalledWith(["lab_assistant"]);
   expect(mocks.getReturnDetails).toHaveBeenCalledWith(loanId, 1);
   expect(response.headers.get("Cache-Control")).toBe("private, no-store");
