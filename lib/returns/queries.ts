@@ -42,3 +42,29 @@ export async function getReturnDetails(
     pickupConditions: conditionResult.rows,
   };
 }
+
+export async function hasActivePickup(
+  loan: ReturnLoan,
+  returnedAt: Date,
+): Promise<boolean> {
+  const result = await getDatabasePool().query<{ exists: boolean }>(
+    `select exists (
+       select 1
+       from public.reservations
+       where item_id = $1
+         and lab_id = $2
+         and status = 'confirmed'
+         and start_at <= $3
+         and end_at > $3
+         and id is distinct from $4::uuid
+     ) as exists`,
+    [
+      loan.item_id,
+      loan.lab_id,
+      returnedAt,
+      loan.reservation_id,
+    ],
+  );
+
+  return result.rows[0].exists;
+}
