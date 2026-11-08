@@ -2,6 +2,7 @@ import "server-only";
 
 import { getDatabasePool } from "@/lib/db";
 import type { PickupCondition, ReturnLoan } from "./types";
+import type { Pool, PoolClient } from "pg";
 
 export async function getReturnDetails(
   loanId: string,
@@ -46,8 +47,9 @@ export async function getReturnDetails(
 export async function hasActivePickup(
   loan: ReturnLoan,
   returnedAt: Date,
+  db: Pool | PoolClient = getDatabasePool(),
 ): Promise<boolean> {
-  const result = await getDatabasePool().query<{ exists: boolean }>(
+  const result = await db.query<{ exists: boolean }>(
     `select exists (
        select 1
        from public.reservations
