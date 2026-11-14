@@ -112,3 +112,10 @@ describe("authenticateWithPassword", () => {
     expect(deps.signOut).toHaveBeenCalledOnce();
   });
 });
+
+it("does not look up a profile when Supabase returns a mismatched identity email", async () => {
+ const deps = dependencies({ signIn: vi.fn().mockResolvedValue({ id: activeStudent.id, email: "other@example.test" }) });
+ const result = await authenticateWithPassword(activeStudent.university_email, "public-dummy-password", ["mail.aub.edu"], deps);
+ expect(result).toMatchObject({ ok: false, code: "missing_profile" });
+ expect(deps.findProfile).not.toHaveBeenCalled(); expect(deps.signOut).toHaveBeenCalledOnce();
+});

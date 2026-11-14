@@ -1,21 +1,23 @@
 # UniTrack migration handoff
 
-Current branch: architecture/microservices. Scope ends at Equipment extraction. Users and Loans extraction have NOT begun. No live SQL, shared-data writes, production provisioning, deployment, push or merge was performed. Private environment files were never opened, read, copied, modified or displayed during this extraction/review.
+Current task branch: architecture/users-service, created from agreed/fetched architecture baseline a31bebd815eac20a49ea5f36ace0193cacd6cf5e with a clean tree and no remote divergence. Scope now includes Users extraction only; Loans extraction has NOT begun. Users extraction is reviewed locally and remains separate from architecture/microservices pending authorized integration. No live SQL, shared-data writes, production provisioning, deployment, push or merge was performed. Private environment files were never opened, read, copied, modified or displayed during this extraction/review.
 
 ## Completed architecture stages
 
 1. Baseline from origin/main 001f952252229aa6172b7b59da5caf82a231c0b4; local tag monolith-baseline. Workspace move committed as 487e717671dfff3054d2be136e49745d322c4ce3.
 2. Shared API/error/identity contracts and HS256 internal authentication, committed as fba34e671522ed22e16a8712a277ac9f7fa4f1ff. Internal tokens require verified signatures, issuer, exact 60-second lifetime and typed user/service identity claims; callers explicitly supply the secret.
 3. Four independently runnable Next.js apps, process-health endpoints, auth fixtures, server-only gateway helper and Windows dev:all process management, committed as 4d988e8152e2673dbbbd5f08ba9b89a3463b1c9e.
-4. Equipment extraction and focused review in the current change. See equipment-extraction.md for endpoint/role tables and detailed source provenance. This is a partial migration, not completed microservices.
+4. Equipment extraction and focused review committed at a31bebd815eac20a49ea5f36ace0193cacd6cf5e. See equipment-extraction.md for endpoint/role tables and detailed source provenance. This is a partial migration, not completed microservices.
+
+5. Users extraction on architecture/users-service: authenticated profile/role/name endpoints, web HTTP bootstrap, removal of web SQL/pg. See users-extraction.md; no deployment changes are included.
 
 ## Running architecture
 
-Browser requests retain their existing /api URLs. Web validates the existing Supabase session, allowed university domain, provisioned matching active profile and lab. Only that verified profile supplies internal identity; browser Authorization, role/user/lab fields cannot set claims. Web signs a short-lived token and calls the configured Equipment origin over HTTP. Equipment independently verifies the token, role and lab before database access.
+Browser requests retain their existing /api URLs. Web validates the existing Supabase session and university domain, then retrieves the matching active profile from Users over HTTP with a restricted gateway service identity. Only after that bootstrap does it construct a trusted user identity; this avoids circular authentication. Only that verified profile supplies internal identity; browser Authorization, role/user/lab fields cannot set claims. Web signs a short-lived token and calls the configured Equipment origin over HTTP. Equipment independently verifies the token, role and lab before database access.
 
-Equipment owns equipment_categories, equipment_items, kits, kit_components and equipment_status_history. Categories remain global Equipment reference data because their existing schema has no lab column; item/component operations use the signed lab. Service identities cannot masquerade as user actors. Status retirement remains manager-only. Web has no Equipment SQL or production imports of Equipment implementation. Its remaining pg/profile access belongs to the future Users extraction. Existing pages, components and browser success shapes are preserved; QR/UI validation helpers do not access the database.
+Equipment owns equipment_categories, equipment_items, kits, kit_components and equipment_status_history. Categories remain global Equipment reference data because their existing schema has no lab column; item/component operations use the signed lab. Service identities cannot masquerade as user actors. Status retirement remains manager-only. Web has no Equipment SQL or production imports of Equipment implementation. Users now owns all profile SQL. Web no longer has pg, lib/db.ts or direct profile/lab SQL. Existing pages, components and browser success shapes are preserved; QR/UI validation helpers do not access the database.
 
-Equipment provides authenticated catalogue/categories/manager-list/create/edit/status routes plus ID lookup, maximum-100-ID batch lookup, availability and component lookup. Only /health is public. Users and Loans still expose skeleton health endpoints, not domain APIs.
+Equipment provides authenticated catalogue/categories/manager-list/create/edit/status routes plus ID lookup, maximum-100-ID batch lookup, availability and component lookup. Only /health is public. Users now serves authenticated profile lookup/list/batch/role operations as detailed in users-extraction.md. Loans remains a skeleton.
 
 ## Startup commands
 
@@ -60,13 +62,15 @@ Invoke-RestMethod http://localhost:3003/health
 
 | Runtime | Names |
 | --- | --- |
-| Web: existing identity/profile access | DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, ALLOWED_EMAIL_DOMAINS |
+| Web: existing identity/session access | NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, ALLOWED_EMAIL_DOMAINS |
+| Web: Users bootstrap and user operations | USERS_SERVICE_URL, INTERNAL_JWT_SECRET |
 | Web: Equipment gateway | EQUIPMENT_SERVICE_URL, INTERNAL_JWT_SECRET |
 | Equipment | DATABASE_URL, INTERNAL_JWT_SECRET |
-| Users/Loans skeleton templates | INTERNAL_JWT_SECRET (health does not require it) |
-| Reserved web template entries for later phases | USERS_SERVICE_URL, LOANS_SERVICE_URL |
+| Users | DATABASE_URL, INTERNAL_JWT_SECRET |
+| Loans skeleton template | INTERNAL_JWT_SECRET (health does not require it) |
+| Reserved web template entries for later phases | LOANS_SERVICE_URL |
 
-Public .env.example templates contain only placeholders. An operator must provision matching internal signing configuration for web and Equipment and the correct pooled Equipment database connection, using trusted server configuration. No values or persistent credentials are supplied here. Web and Equipment have separate application roots; root private configuration is not a substitute for the web/service roots. Do not copy, inspect or overwrite existing private files as part of this handoff. Missing Equipment URL/secret never falls back to local SQL or a fallback credential.
+Public .env.example templates contain only placeholders. An operator must provision matching internal signing configuration for web, Users and Equipment and the correct pooled Equipment database connection, using trusted server configuration. No values or persistent credentials are supplied here. Web, Users and Equipment have separate application roots; root private configuration is not a substitute for the web/service roots. Do not copy, inspect or overwrite existing private files as part of this handoff. Missing Equipment URL/secret never falls back to local SQL or a fallback credential.
 
 ## Database readiness and migration order (none executed here)
 
@@ -128,7 +132,7 @@ Real Supabase-to-profile-to-Equipment workflows, live PostgreSQL constraints/loc
 
 ## Temporary limitations
 
-Catalogue expectedReturn is always null until Loans aggregation. Equipment availability reports only Equipment-owned state; it does not promise a conflict-free reservation or enforce Loans windows/limits. Users/profile SQL remains in web, and database roles/RLS do not yet enforce service isolation. Cross-owner foreign keys are still present. Equipment configured authenticated workflows require manual secret/URL/database/schema readiness. The UI has not been redesigned. Users and Loans are still skeletons.
+Catalogue expectedReturn is always null until Loans aggregation. Equipment availability reports only Equipment-owned state; it does not promise a conflict-free reservation or enforce Loans windows/limits. Users/profile SQL has left web, but database roles/RLS do not yet enforce service isolation. Cross-owner foreign keys are still present. Equipment configured authenticated workflows require manual secret/URL/database/schema readiness. The UI has not been redesigned. Users and Equipment are extracted; Loans is still a skeleton.
 
 ## Preserved return branch integration
 
@@ -142,9 +146,9 @@ Branch feature/C430PRJCT-41-return-equipment stays at 3f220aa090d1774f112ba888cd
 
 ## Remaining work by boundary (not implemented)
 
-### Users
+### Users (implemented, live verification pending)
 
-Extract profiles/roles/lab membership into Users, add profile/batch/role endpoints and replace web profile SQL. Keep Supabase session/domain checks in web; remove web pg/DATABASE_URL only after its last profile read is migrated.
+Users profile lookup/list/batch/role endpoints and database ownership are implemented. Login/actions/authorization/manager pages now use HTTP; web has no SQL/pg dependency. Live Supabase-to-Users/PostgreSQL verification remains unperformed. No additional lab administration or provisioning features were added.
 
 ### Loans
 
@@ -158,10 +162,26 @@ Review/apply pending schema work separately; create per-service roles/grants/RLS
 
 Use a separately authorized isolated real PostgreSQL/test-auth environment for parallel requests, history-failure rollback, uncertain commits and real HTTP services. Then verify real login/role/lab flows, return compensation, crash reconciliation and phone workflows. Current mocks do not replace this stage.
 
-### Deployment
+### Deployment (separate ownership)
+
+Jana is investigating Vercel configuration separately. No settings or deployment fixes were changed in this Users task.
 
 Prepare separate web/Users/Equipment/Loans projects, manual server configuration, pooled connections and deployment protection. Build shared exports before each app build; root-directory/install/build settings require review. No live Vercel settings have changed. Deploy/redeploy proof, logging/tracing evidence and demo documentation remain later tasks.
 
 ## Final review results
 
 All final workspace checks passed: type generation, 314 tests across 28 files (web 88, Equipment 143, shared auth 63, Users/Loans skeletons 10 each), lint without warnings, typecheck and all builds. Lockfile dry-run and whitespace checks passed. No existing dependency version changed. Focused review added actionable sanitized readiness failures, explicit read-committed status transactions, recognition of legacy-writer key collisions, separate-connection modeled concurrency tests and static migration-compatibility tests. The code/fixture assertions are not proof of real PostgreSQL behavior or real Supabase-authenticated end-to-end operation. Both migration files remain unexecuted by this work; the user-reported shared request_key readiness was not queried.
+
+## Users extraction handoff
+
+See users-extraction.md for the current audit, endpoint/role/privacy matrix, bootstrap ordering, variable names, test evidence and limits. No Users migration was required or executed; earlier Equipment migration readiness remains unchanged. Public templates only were edited: Users gained DATABASE_URL and web removed it. Private files are untouched. Existing role behavior tests were preserved/moved, and new HTTP tests distinguish fixture Supabase/PostgreSQL from live workflows. The existing Equipment verification record above is historical; final Users results are recorded separately below.
+
+## Users task verification (current)
+
+On architecture/users-service, final typegen/tests/lint/typecheck/build passed. Total: 366 tests / 31 files (web 100, Users 50, Equipment 143, shared auth 63, Loans skeleton 10). Original 314 tests remain represented. Real local HTTP fixtures validated bootstrap, role refresh, restrictions/privacy and failure sanitization with fake Supabase/PostgreSQL. dev:all startup, public health, four unsigned Users method rejections and shutdown were checked; no real authenticated database flow was run. No Users migration, credentials, deployment changes, pushes or merges were performed for this task. Existing Equipment source and return branch are unchanged.
+
+## Users focused review
+
+Verified Supabase-first bootstrap, restricted service/user identities, fresh profile-derived claims, active/known/university account checks, role/lab/privacy enforcement, production SQL/import boundaries and unchanged Equipment/return-branch source. React cache is request-scoped, not a persistent profile/privilege cache; outbound fetch uses no-store. Users revalidates current actor role/lab/active state; existing Equipment JWT lifetime behavior remains unchanged.
+
+Fixed a malformed-body ordering regression: the web role gateway now sends null input to Users for validation after authorization, so a student remains forbidden (403) even with malformed JSON, while an authorized manager receives 400. A real local HTTP fixture regression covers both and confirms no UPDATE. All HTTP tests use isolated Supabase/PostgreSQL fixtures, not real logged-in/database end-to-end verification. Deployment settings and private environment files remain untouched.

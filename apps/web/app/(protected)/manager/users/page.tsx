@@ -4,7 +4,7 @@ import { RoleEditor } from "./role-editor";
 
 export default async function ManageUsersPage() {
   const manager = await requirePageProfile(["lab_manager"]);
-  const profiles = await listProfilesByLab(manager.lab_id);
+  const profiles = await listProfilesByLab(manager);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 sm:py-16">

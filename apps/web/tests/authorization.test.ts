@@ -4,10 +4,12 @@ import type { Profile } from "@/lib/auth/model";
 
 const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
+  forwardUsers: vi.fn(),
   findProfileById: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/gateway/users", () => ({ forwardUsers: mocks.forwardUsers }));
 vi.mock("@/lib/profiles", () => ({
   findProfileById: mocks.findProfileById,
 }));
@@ -18,7 +20,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 import { requireRole } from "@/lib/auth/authorization";
-import { handleRoleUpdate } from "@/lib/auth/role-update-handler";
+import { PATCH } from "@/app/api/users/[id]/role/route";
 
 const userId = "1b853b74-1797-4f67-9aa8-36618e8bd949";
 const student: Profile = {
@@ -64,26 +66,13 @@ describe("role authorization", () => {
       status: 403,
     });
 
-    const response = await handleRoleUpdate(
-      new Request(`http://localhost/api/users/${userId}/role`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "lab_manager" }),
-      }),
-      userId,
-      {
-        authorizeManager: vi.fn().mockResolvedValue({
-          ...student,
-          id: "05910d42-6dc7-4fdb-a65a-7b1043b03e58",
-          full_name: "Demo Manager",
-          university_email: "manager@mail.aub.edu",
-          role: "lab_manager",
-        }),
-        updateRoleInLab: vi.fn().mockImplementation(async (_id, role) => {
-          currentProfile = { ...currentProfile, role };
-          return currentProfile;
-        }),
-      },
+    mocks.forwardUsers.mockImplementation(async () => {
+      currentProfile = { ...currentProfile, role: "lab_manager" };
+      return Response.json({ profile: currentProfile });
+    });
+    const response = await PATCH(
+      new Request(`http://localhost/api/users/${userId}/role`, { method: "PATCH", body: JSON.stringify({ role: "lab_manager" }) }),
+      { params: Promise.resolve({ id: userId }) },
     );
 
     expect(response.status).toBe(200);

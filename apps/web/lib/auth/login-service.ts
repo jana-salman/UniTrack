@@ -59,6 +59,12 @@ export async function authenticateWithPassword(
     return invalidCredentials();
   }
 
+  const authenticatedEmail = normalizeEmail(user.email ?? "");
+  if (authenticatedEmail !== normalizedEmail || !isUniversityEmail(authenticatedEmail, allowedDomains)) {
+    await dependencies.signOut();
+    return failure("missing_profile", "This account is not provisioned for UniTrack.");
+  }
+
   let profile: Profile | null;
   try {
     profile = await dependencies.findProfile(user.id);
@@ -67,7 +73,6 @@ export async function authenticateWithPassword(
      return unavailable();
   }
 
-  const authenticatedEmail = normalizeEmail(user.email ?? "");
   if (
     !profile ||
     authenticatedEmail !== normalizedEmail ||

@@ -25,3 +25,6 @@ export interface ServiceIdentity {
 export type InternalIdentity = UserIdentity | ServiceIdentity;
 
 export { EQUIPMENT_ERROR_CONTRACT } from "./equipment.js";
+
+export { isUserProfile, isProfileId, USERS_ERROR_CONTRACT } from "./users.js";
+export type { UserProfile, ProfileName } from "./users.js";

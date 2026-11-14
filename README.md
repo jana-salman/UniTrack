@@ -2,17 +2,18 @@
 University equipment borrowing and management system.
 
 ## Current layout
-Equipment business logic now runs in its independent service behind the existing web APIs. Users and Loans remain skeletons; profile authentication/database access remains in web. This is a partial migration, not completed microservices.
+Users and Equipment business logic run in independent services behind the existing web APIs. Web keeps Supabase sessions and university-domain checks, bootstrapping profiles through Users HTTP; Loans remains a skeleton. Web has no database driver or direct SQL. This is a partial migration, not completed microservices.
 - apps/web: pages, API routes, components, libraries, tests, public assets and app configuration.
 - services/equipment: authenticated Equipment backend and public /health.
-- services/users, services/loans: independently runnable skeletons with public /health.
+- services/users: authenticated profile/role/name backend and public /health.
+- services/loans: independently runnable skeleton with public /health.
 - database: shared SQL scripts, migrations and database documentation (paths unchanged).
 - docs: project records and architecture notes.
 - Root package.json and package-lock.json: workspace commands and one dependency lockfile.
 
 ## Local setup
 1. Run npm ci from the repository root.
-2. Create apps/web/.env.local from apps/web/.env.example without overwriting an existing local file. Obtain values privately for DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY and ALLOWED_EMAIL_DOMAINS.
+2. Create apps/web/.env.local from apps/web/.env.example without overwriting an existing local file. Obtain values privately for NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY and ALLOWED_EMAIL_DOMAINS.
 3. Configure the Equipment gateway/service names listed in docs/architecture/handoff.md through trusted server configuration, then run npm run dev:all. Do not inspect or overwrite existing private files for this handoff.
 
 Next.js loads environment files from apps/web. The original root .env.local is preserved but is no longer the application's environment location. A private local copy was made for verification; neither file is tracked. Environment files are ignored at every depth except placeholder .env.example files. Never commit real values.
@@ -68,3 +69,7 @@ See [Equipment architecture, setup and return-branch handoff](docs/architecture/
 ## Current handoff
 
 [Migration handoff](docs/architecture/handoff.md) is the current entry point for exact commands, configuration names, migration order, verification limits, preserved return-branch integration and remaining work. Earlier phase records describe their state at that time.
+
+## Users extraction
+
+See [Users extraction record](docs/architecture/users-extraction.md) and the updated [handoff](docs/architecture/handoff.md). USERS_SERVICE_URL and INTERNAL_JWT_SECRET connect web to Users; Users owns DATABASE_URL. No private configuration was changed. Supabase session and university-domain checks remain web-side. Jana owns the separate Vercel investigation; older deployment notes above were not changed or validated by this task.

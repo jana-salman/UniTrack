@@ -1,3 +1,5 @@
+import { isProfileId } from "@unitrack/contracts";
+import { usersFailure } from "../errors";
 import { AuthorizationError } from "./errors";
 import {
   isProfileRole,
@@ -14,8 +16,6 @@ export type RoleUpdateDependencies = {
   ) => Promise<Profile | null>;
 };
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function handleRoleUpdate(
   request: Request,
@@ -25,7 +25,7 @@ export async function handleRoleUpdate(
   try {
     const manager = await dependencies.authorizeManager();
 
-    if (!UUID_PATTERN.test(userId)) {
+    if (!isProfileId(userId)) {
       return Response.json({ error: "Invalid user id." }, { status: 400 });
     }
 
@@ -59,7 +59,8 @@ export async function handleRoleUpdate(
       );
     }
 
-    console.error("Role update failed", error);
+    const unavailable = usersFailure(error);
+    if (unavailable.status === 503) return unavailable;
     return Response.json(
       { error: "Unable to update the role." },
       { status: 500 },

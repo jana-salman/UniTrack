@@ -1,29 +1,30 @@
+import { UsersError } from "./errors";
 import "server-only";
 
 import { Pool } from "pg";
 
 declare global {
-  var unitrackPgPool: Pool | undefined;
+  var unitrackUsersPgPool: Pool | undefined;
 }
 
 function createPool(): Pool {
   const connectionString = process.env.DATABASE_URL;
 
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is required for server-side database access.");
+  if (!connectionString?.trim()) {
+    throw new UsersError(503, "users_not_configured", "Users service is not configured.");
   }
 
   return new Pool({
     connectionString,
-    max: 5,
+    max: 3,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
   });
 }
 
 export function getDatabasePool(): Pool {
-  globalThis.unitrackPgPool ??= createPool();
-  return globalThis.unitrackPgPool;
+  globalThis.unitrackUsersPgPool ??= createPool();
+  return globalThis.unitrackUsersPgPool;
 }
 
 // Compatibility: older code imports { pool } from "@/lib/db".

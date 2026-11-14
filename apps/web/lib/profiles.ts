@@ -1,76 +1,34 @@
 import "server-only";
-
-import type { QueryResultRow } from "pg";
-
-import { getDatabasePool } from "@/lib/db";
-import {
-  isProfileRole,
-  type Profile,
-  type ProfileRole,
-} from "@/lib/auth/model";
-
-type ProfileRow = QueryResultRow & Profile;
-
-const PROFILE_COLUMNS = `
-  id,
-  full_name,
-  university_email,
-  role,
-  lab_id,
-  is_active
-`;
-
+import { getRequestId } from "@unitrack/internal-auth";
+import { isUserProfile, type UserProfile as Profile } from "@unitrack/contracts";
+import { callUsers, UsersServiceUnavailableError } from "./gateway/users-client";
+function profile(value: unknown): Profile {
+ if (!isUserProfile(value)) throw new UsersServiceUnavailableError();
+ const { id, full_name, university_email, role, lab_id, is_active } = value;
+ return { id, full_name, university_email, role, lab_id, is_active };
+}
+// Called only after trusted Supabase sign-in/getUser; never an arbitrary browser profile ID.
 export async function findProfileById(userId: string): Promise<Profile | null> {
-  const result = await getDatabasePool().query<ProfileRow>(
-    `SELECT ${PROFILE_COLUMNS}
-     FROM public.profiles
-     WHERE id = $1
-     LIMIT 1`,
-    [userId],
-  );
-
-  return result.rows[0] ? toProfile(result.rows[0]) : null;
+ const response = await callUsers("/profiles/" + encodeURIComponent(userId), { kind: "service", sub: "gateway", role: "service", lab_id: null, rid: getRequestId() });
+ if (response.status === 404) {
+  try { const body = await response.json(); if (body?.error === "User profile not found.") return null; } catch { /* Treat non-contract 404s as unavailable, not unknown users. */ }
+  throw new UsersServiceUnavailableError();
+ }
+ if (!response.ok) throw new UsersServiceUnavailableError();
+ try {
+  const result = profile(await response.json());
+  if (result.id.toLowerCase() !== userId.toLowerCase()) throw new UsersServiceUnavailableError();
+  return result;
+ } catch { throw new UsersServiceUnavailableError(); }
 }
-
-export async function listProfilesByLab(labId: number): Promise<Profile[]> {
-  const result = await getDatabasePool().query<ProfileRow>(
-    `SELECT ${PROFILE_COLUMNS}
-     FROM public.profiles
-     WHERE lab_id = $1
-     ORDER BY full_name, university_email`,
-    [labId],
-  );
-
-  return result.rows.map(toProfile);
-}
-
-export async function updateProfileRoleInLab(
-  userId: string,
-  role: ProfileRole,
-  labId: number,
-): Promise<Profile | null> {
-  const result = await getDatabasePool().query<ProfileRow>(
-    `UPDATE public.profiles
-     SET role = $1
-     WHERE id = $2 AND lab_id = $3
-     RETURNING ${PROFILE_COLUMNS}`,
-    [role, userId, labId],
-  );
-
-  return result.rows[0] ? toProfile(result.rows[0]) : null;
-}
-
-function toProfile(row: ProfileRow): Profile {
-  if (!isProfileRole(row.role)) {
-    throw new Error(`Unsupported profile role in database: ${String(row.role)}`);
-  }
-
-  return {
-    id: row.id,
-    full_name: row.full_name,
-    university_email: row.university_email,
-    role: row.role,
-    lab_id: row.lab_id,
-    is_active: row.is_active,
-  };
+export async function listProfilesByLab(manager: Profile): Promise<Profile[]> {
+ const response = await callUsers("/profiles?labId=" + manager.lab_id, { kind: "user", sub: manager.id, role: manager.role, lab_id: manager.lab_id, rid: getRequestId() });
+ if (!response.ok) throw new UsersServiceUnavailableError();
+ try {
+  const data: unknown = await response.json();
+  if (!Array.isArray(data)) throw new UsersServiceUnavailableError();
+  const rows = data.map(profile);
+  if (rows.some(row => row.lab_id !== manager.lab_id)) throw new UsersServiceUnavailableError();
+  return rows;
+ } catch { throw new UsersServiceUnavailableError(); }
 }
