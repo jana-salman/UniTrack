@@ -49,3 +49,7 @@ See [baseline, verification and return-branch integration map](docs/architecture
 - Regular feature branch names: feature/C430PRJCT-XX-short-name.
 - Architecture preparation is on architecture/microservices.
 - Every change goes through a pull request with at least one review.
+
+## Shared contracts and internal authentication
+
+The compiled TypeScript workspaces [@unitrack/contracts](packages/contracts/README.md) and [@unitrack/internal-auth](packages/internal-auth/README.md) provide shared identity/API types, signed internal tokens and tracing IDs. Root npm test and npm run typecheck build the packages first; npm run build builds packages before the web app. npm run build:packages builds only shared packages. Root lint checks all workspaces. The current web application does not use them yet. INTERNAL_JWT_SECRET must be supplied explicitly by future server-side callers; production provisioning remains a later setup step. No private environment files need changes for this task.

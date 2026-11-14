@@ -1,0 +1,25 @@
+export interface ApiError { error: string; code?: string }
+export interface HealthResponse { service: string; status: string; version: string }
+
+// Matches the existing profile roles in apps/web/lib/auth/model.ts.
+export const PROFILE_ROLES = ["student", "lab_assistant", "professor", "lab_manager"] as const;
+export type ProfileRole = (typeof PROFILE_ROLES)[number];
+export function isProfileRole(value: unknown): value is ProfileRole {
+  return typeof value === "string" && PROFILE_ROLES.includes(value as ProfileRole);
+}
+
+export interface UserIdentity {
+  kind: "user";
+  sub: string;
+  role: ProfileRole;
+  lab_id: number;
+  rid: string;
+}
+export interface ServiceIdentity {
+  kind: "service";
+  sub: "gateway";
+  role: "service";
+  lab_id: null;
+  rid: string;
+}
+export type InternalIdentity = UserIdentity | ServiceIdentity;
