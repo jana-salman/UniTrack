@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PATCH } from "@/app/api/items/[id]/route";
+import { PATCH } from "@/app/items/[id]/route";
 import { requireRole } from "@/lib/auth/authorization";
 import { AuthorizationError } from "@/lib/auth/errors";
 import { updateEquipment } from "@/lib/equipment-queries";
@@ -43,7 +43,7 @@ function makeRequest(body: unknown): Request {
   });
 }
 
-function makeContext(id = ITEM_ID): RouteContext<"/api/items/[id]"> {
+function makeContext(id = ITEM_ID): RouteContext<"/items/[id]"> {
   return {
     params: Promise.resolve({ id }),
   };
@@ -55,11 +55,8 @@ describe("PATCH /api/items/[id]", () => {
 
     vi.mocked(requireRole).mockResolvedValue({
       id: "test-manager",
-      full_name: "Test Manager",
-      university_email: "manager@aub.edu.lb",
       role: "lab_manager",
       lab_id: 1,
-      is_active: true,
     });
 
     vi.mocked(updateEquipment).mockResolvedValue({
@@ -77,7 +74,7 @@ describe("PATCH /api/items/[id]", () => {
 
     expect(response.status).toBe(200);
 
-    expect(requireRole).toHaveBeenCalledWith(["lab_manager"]);
+    expect(requireRole).toHaveBeenCalledWith(expect.any(Request), ["lab_manager"]);
 
     expect(updateEquipment).toHaveBeenCalledWith(
       expect.any(Object),

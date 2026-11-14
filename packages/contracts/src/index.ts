@@ -23,3 +23,5 @@ export interface ServiceIdentity {
   rid: string;
 }
 export type InternalIdentity = UserIdentity | ServiceIdentity;
+
+export { EQUIPMENT_ERROR_CONTRACT } from "./equipment.js";

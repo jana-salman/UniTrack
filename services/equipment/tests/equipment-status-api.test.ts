@@ -29,18 +29,19 @@ vi.mock("@/lib/db", () => ({
   }),
 }));
 
-vi.mock("@/lib/equipment-status-transaction", () => ({
+vi.mock("@/lib/equipment-status-transaction", async () => ({
+  ...await vi.importActual("@/lib/equipment-status-transaction"),
   updateEquipmentStatus: mocks.updateEquipmentStatus,
 }));
 
-import { PATCH } from "@/app/api/items/[id]/status/route";
+import { PATCH } from "@/app/items/[id]/status/route";
 import { AuthorizationError } from "@/lib/auth/errors";
 
 const itemId = "550e8400-e29b-41d4-a716-446655440000";
 
 const context = {
   params: Promise.resolve({ id: itemId }),
-} as RouteContext<"/api/items/[id]/status">;
+} as RouteContext<"/items/[id]/status">;
 
 function makeRequest(body: unknown): Request {
   return new Request(`http://localhost/api/items/${itemId}/status`, {
@@ -164,7 +165,8 @@ test("allows lab managers to update equipment status", async () => {
     "under_maintenance",
     "550e8400-e29b-41d4-a716-446655440001",
     1,
-    "Needs repair"
+    "Needs repair",
+    { expectedStatus: undefined, idempotencyKey: undefined }
   );
 
   expect(release).toHaveBeenCalledOnce();
@@ -278,7 +280,7 @@ test("releases database connection when status update fails", async () => {
 test("rejects invalid equipment UUID before connecting to database", async () => {
   const invalidContext = {
     params: Promise.resolve({ id: "invalid-id" }),
-  } as RouteContext<"/api/items/[id]/status">;
+  } as RouteContext<"/items/[id]/status">;
 
   const response = await PATCH(
     makeRequest({ status: "available" }),

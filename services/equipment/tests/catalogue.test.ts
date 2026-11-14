@@ -15,12 +15,12 @@ describe("catalogue query (S1-12)", () => {
     expect(query.mock.calls[0][0]).toContain("status <> 'retired'");
   });
 
-  it("reads the due date from the active loan only", async () => {
+  it("keeps expectedReturn null without reading Loans until integration", async () => {
     query.mockResolvedValue({ rows: [] });
     await getCatalogue("", "", 1);
     const sql = String(query.mock.calls[0][0]);
-    expect(sql).toContain("LEFT JOIN loans");
-    expect(sql).toContain("returned_at IS NULL");
+    expect(sql).not.toMatch(/\bloans\b/i);
+    expect(sql).toContain('NULL::text AS "expectedReturn"');
   });
 
   it("only returns items of the user's lab", async () => {
@@ -77,4 +77,8 @@ describe("catalogue query (S1-12)", () => {
     const labels = (await getCatalogue("", "", 1)).map((i) => i.status);
     expect(labels).toEqual(["Borrowed", "Under Repair", "Inspection Required"]);
   });
+});
+it("always returns expectedReturn:null until Loans aggregation exists", async () => {
+  query.mockResolvedValue({ rows: [{ id: "one", status: "available", expectedReturn: "old-value" }] });
+  expect((await getCatalogue("", "", 1))[0].expectedReturn).toBeNull();
 });

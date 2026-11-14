@@ -46,6 +46,21 @@ describe("gateway service caller", () => {
     expect(response.status).toBe(status); expect(await response.json()).toMatchObject({ code: "upstream_" + status });
     expect(response.headers.has("Set-Cookie")).toBe(false); expect(response.headers.has("Authorization")).toBe(false);
   });
+  it("preserves approved field errors and strips unrelated error fields", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: "Name is required.", errors: ["Name is required."], code: "invalid_input", debug: "not-public" }, { status: 400 })));
+    const call = createServiceCaller({ baseUrl: "https://equipment.test", secret, errorContract: { messages: ["Name is required."], codes: ["invalid_input"] } });
+    const response = await call("/items", identity);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Name is required.", errors: ["Name is required."], code: "invalid_input" });
+  });
+  it("does not relay unapproved or credential-bearing domain error fields", async () => {
+    const call = createServiceCaller({ baseUrl: "https://equipment.test", secret, errorContract: { messages: ["Safe error."], codes: [] } });
+    for (const data of [{ error: secret }, { error: "Safe error.", code: "credential-marker" }, { error: "Safe error.", debug: secret }]) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(data, { status: 409 })));
+      const response = await call("/items", identity);
+      expect(await response.json()).toEqual({ error: "Service request conflicts with current state.", code: "upstream_409" });
+    }
+  });
   it("maps connection failures and never retries mutations", async () => {
     const fetcher = vi.fn().mockRejectedValue(new Error("private connection details " + secret)); vi.stubGlobal("fetch", fetcher);
     const response = await caller()("/items", identity, { method: "PATCH", body: { status: "example" } });

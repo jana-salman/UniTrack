@@ -4,7 +4,7 @@ Signs and verifies internal JWTs with jose. Only HS256 is accepted, issuer is un
 
 ## Usage
 
-Build packages with npm run build:packages from the repository root. In a future server-side workspace, declare @unitrack/internal-auth and @unitrack/contracts dependencies before importing them. No gateway or service uses them yet.
+Build packages with npm run build:packages from the repository root. In a future server-side workspace, declare @unitrack/internal-auth and @unitrack/contracts dependencies before importing them. The web Equipment gateway and Equipment service now use these exports.
 
 ```ts
 import { getRequestId, signInternalToken, verifyInternalToken } from "@unitrack/internal-auth";

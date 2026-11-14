@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { POST } from "@/app/api/categories/route";
+import { POST } from "@/app/categories/route";
 import { requireRole } from "@/lib/auth/authorization";
 import { AuthorizationError } from "@/lib/auth/errors";
 import { createCategory } from "@/lib/category-queries";
@@ -39,11 +39,8 @@ describe("POST /api/categories", () => {
     // By default, simulate an authenticated Lab Manager.
     vi.mocked(requireRole).mockResolvedValue({
       id: "test-user",
-      full_name: "Test Manager",
-      university_email: "manager@aub.edu.lb",
       role: "lab_manager",
       lab_id: 1,
-      is_active: true,
     });
 
     // By default, simulate a successful database insertion.
@@ -68,7 +65,7 @@ describe("POST /api/categories", () => {
       name: "Drones",
     });
 
-    expect(requireRole).toHaveBeenCalledWith(["lab_manager"]);
+    expect(requireRole).toHaveBeenCalledWith(expect.any(Request), ["lab_manager"]);
     expect(createCategory).toHaveBeenCalledOnce();
   });
 

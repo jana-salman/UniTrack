@@ -2,9 +2,10 @@
 University equipment borrowing and management system.
 
 ## Current layout
-Business features still run in the existing web application. Three independent service skeletons expose health only; business logic has not been extracted. This is not completed microservices.
+Equipment business logic now runs in its independent service behind the existing web APIs. Users and Loans remain skeletons; profile authentication/database access remains in web. This is a partial migration, not completed microservices.
 - apps/web: pages, API routes, components, libraries, tests, public assets and app configuration.
-- services/users, services/equipment, services/loans: independently runnable Next.js skeletons with public /health and authentication helpers.
+- services/equipment: authenticated Equipment backend and public /health.
+- services/users, services/loans: independently runnable skeletons with public /health.
 - database: shared SQL scripts, migrations and database documentation (paths unchanged).
 - docs: project records and architecture notes.
 - Root package.json and package-lock.json: workspace commands and one dependency lockfile.
@@ -12,7 +13,7 @@ Business features still run in the existing web application. Three independent s
 ## Local setup
 1. Run npm ci from the repository root.
 2. Create apps/web/.env.local from apps/web/.env.example without overwriting an existing local file. Obtain values privately for DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY and ALLOWED_EMAIL_DOMAINS.
-3. Run npm run dev from the root; open http://localhost:3000.
+3. Configure the Equipment gateway/service names listed in docs/architecture/handoff.md through trusted server configuration, then run npm run dev:all. Do not inspect or overwrite existing private files for this handoff.
 
 Next.js loads environment files from apps/web. The original root .env.local is preserved but is no longer the application's environment location. A private local copy was made for verification; neither file is tracked. Environment files are ignored at every depth except placeholder .env.example files. Never commit real values.
 
@@ -36,7 +37,7 @@ Apply only when the workspace changes are reviewed and ready for deployment. Liv
 - Root Directory: apps/web.
 - Include source files outside of the Root Directory in the Build Step: enabled (root lockfile and hoisted dependencies).
 - Install Command override: cd ../.. && npm ci (runs at the repository root).
-- Build Command override: npm run build (runs in apps/web).
+- Build Command override: cd ../.. && npm run build:packages && npm run build --workspace=@unitrack/web (build shared exports before web; commands start in apps/web).
 - Output Directory: framework default (.next); do not set apps/web/.next relative to apps/web.
 - Development Command: npm run dev.
 - Retain the existing compatible Node.js version; do not change production branches or deployment settings as part of this task.
@@ -54,8 +55,16 @@ See [baseline, verification and return-branch integration map](docs/architecture
 
 ## Shared contracts and internal authentication
 
-The compiled TypeScript workspaces [@unitrack/contracts](packages/contracts/README.md) and [@unitrack/internal-auth](packages/internal-auth/README.md) provide shared identity/API types, signed internal tokens and tracing IDs. Root npm test and npm run typecheck build the packages first; npm run build builds packages before the web app. npm run build:packages builds only shared packages. Root lint checks all workspaces. The current web application does not use them yet. INTERNAL_JWT_SECRET must be supplied explicitly by future server-side callers; production provisioning remains a later setup step. No private environment files need changes for this task.
+The compiled TypeScript workspaces [@unitrack/contracts](packages/contracts/README.md) and [@unitrack/internal-auth](packages/internal-auth/README.md) provide shared identity/API types, signed internal tokens and tracing IDs. Root npm test and npm run typecheck build the packages first; npm run build builds packages before the web app. npm run build:packages builds only shared packages. Root lint checks all workspaces. The web Equipment gateway and Equipment service consume them. INTERNAL_JWT_SECRET is supplied explicitly by server-side callers; production provisioning remains a later setup step. No private environment files need changes for this task.
 
 ## Service skeletons and gateway communication
 
-See [service skeleton setup and verification](docs/architecture/service-skeletons.md). The new .env.example entries are empty placeholders only: INTERNAL_JWT_SECRET, USERS_SERVICE_URL, EQUIPMENT_SERVICE_URL and LOANS_SERVICE_URL for future web calls; each service lists INTERNAL_JWT_SECRET only. Health/startup requires no secret. No private configuration was changed. The gateway helper is not wired into existing web routes, and existing session/profile authentication remains unchanged. Current Vercel instructions above cover the web project only; separate service deployment/provisioning remains a later task.
+See [service skeleton setup and verification](docs/architecture/service-skeletons.md). The new .env.example entries are empty placeholders only: INTERNAL_JWT_SECRET, USERS_SERVICE_URL, EQUIPMENT_SERVICE_URL and LOANS_SERVICE_URL for future web calls; Users/Loans list INTERNAL_JWT_SECRET; Equipment also lists DATABASE_URL. Health/startup requires no secret. No private configuration was changed. Equipment routes now use the gateway helper; existing session/profile authentication remains unchanged. Current Vercel instructions above cover the web project only; separate service deployment/provisioning remains a later task.
+
+## Equipment extraction
+
+See [Equipment architecture, setup and return-branch handoff](docs/architecture/equipment-extraction.md). Existing browser APIs now use HTTP to Equipment; configure EQUIPMENT_SERVICE_URL and INTERNAL_JWT_SECRET for web, and DATABASE_URL and INTERNAL_JWT_SECRET for Equipment. Catalogue expectedReturn is temporarily null. Keyed status operations require the reviewed but unexecuted fingerprint migration; do not rerun the return branch request_key migration already applied to shared development. No private files, real credentials, live data or deployments were changed. Earlier skeleton records describe the preceding phase.
+
+## Current handoff
+
+[Migration handoff](docs/architecture/handoff.md) is the current entry point for exact commands, configuration names, migration order, verification limits, preserved return-branch integration and remaining work. Earlier phase records describe their state at that time.

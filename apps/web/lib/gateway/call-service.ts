@@ -3,8 +3,8 @@ import { signInternalToken } from "@unitrack/internal-auth";
 import type { ApiError, InternalIdentity } from "@unitrack/contracts";
 
 export const SERVICE_TIMEOUT_MS = 5000;
-interface ServiceConfig { baseUrl: string; secret: string }
-interface ServiceRequest { method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD"; body?: unknown }
+interface ServiceConfig { baseUrl: string; secret: string; errorContract?: { messages: readonly string[]; codes: readonly string[] } }
+interface ServiceRequest { method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD"; body?: unknown; idempotencyKey?: string }
 function failure(status: number, error: string, code: string, rid?: string) {
   return Response.json({ error, code } satisfies ApiError, {
     status, headers: rid ? { "X-Request-Id": rid } : undefined,
@@ -42,11 +42,27 @@ export function createServiceCaller(config: ServiceConfig) {
     try {
       const response = await fetch(url, {
         method: request.method ?? "GET",
-        headers: { Authorization: "Bearer " + token, "X-Request-Id": identity.rid, "Content-Type": "application/json" },
+        headers: { Authorization: "Bearer " + token, "X-Request-Id": identity.rid, "Content-Type": "application/json", ...(request.idempotencyKey === undefined ? {} : { "Idempotency-Key": request.idempotencyKey }) },
         body: request.body === undefined ? undefined : JSON.stringify(request.body),
         signal: controller.signal, redirect: "error", cache: "no-store", credentials: "omit",
       });
       if (!response.ok) {
+        // Explicit wire vocabulary preserves meaningful domain errors without free text.
+        if (config.errorContract && expectedErrors[response.status] && response.headers.get("content-type")?.includes("application/json")) {
+          let data: unknown;
+          try { data = await response.json(); } catch { if (controller.signal.aborted) throw new Error(); }
+          if (data && typeof data === "object" && !Array.isArray(data)) {
+            const value = data as Record<string, unknown>;
+            const fields = value.errors;
+            const safeFields = Array.isArray(fields) && fields.length > 0 && fields.every(v => typeof v === "string" && config.errorContract!.messages.includes(v));
+            const safeMessage = typeof value.error === "string" && (config.errorContract.messages.includes(value.error) || (safeFields && value.error === fields.join(" ")));
+            const safeCode = value.code === undefined || (typeof value.code === "string" && config.errorContract.codes.includes(value.code));
+            const serialized = JSON.stringify(data);
+            if ((safeMessage || (value.error === undefined && safeFields)) && safeCode && !serialized.includes(token) && !serialized.includes(JSON.stringify(secret).slice(1, -1))) {
+              return Response.json({ ...(safeMessage ? { error: value.error } : {}), ...(safeFields ? { errors: fields } : {}), ...(value.code ? { code: value.code } : {}) }, { status: response.status, headers: { "X-Request-Id": identity.rid } });
+            }
+          }
+        }
         // Preserve expected status, never relay arbitrary upstream text/headers.
         return expectedErrors[response.status]
           ? failure(response.status, expectedErrors[response.status], "upstream_" + response.status, identity.rid)

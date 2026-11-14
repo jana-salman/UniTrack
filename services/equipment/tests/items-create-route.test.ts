@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { POST } from "@/app/api/items/route";
+import { POST } from "@/app/items/route";
 import { requireRole } from "@/lib/auth/authorization";
 import { AuthorizationError } from "@/lib/auth/errors";
 import { createEquipment } from "@/lib/equipment-queries";
@@ -81,7 +81,7 @@ describe("POST /api/items", () => {
       lab_id: 1,
     });
 
-    expect(requireRole).toHaveBeenCalledWith(["lab_manager"]);
+    expect(requireRole).toHaveBeenCalledWith(expect.any(Request), ["lab_manager"]);
     expect(createEquipment).toHaveBeenCalledOnce();
   });
 

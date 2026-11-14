@@ -1,11 +1,11 @@
-# equipment service skeleton
+# Equipment Service
 
-Independent Next.js application exposing only public GET /health with service, status and package version. No SQL, domain routes or downstream calls exist. Health remains available without configuration and reveals no configuration values.
+Independent authenticated Next.js Equipment backend. Owns equipment_categories, equipment_items, kits, kit_components and equipment_status_history. No Users/Loans table queries.
 
-From the repository root, run npm install, then npm run build:packages. Run npm run dev --workspace=@unitrack/equipment for this app alone, or npm run dev:all for all four apps. Its fixed development/start port is 3002. Build with npm run build --workspace=@unitrack/equipment; npm run start --workspace=@unitrack/equipment serves that build on the same port.
+Public GET /health is configuration-free. Business routes require verified internal user tokens and role/lab authorization: catalogue, categories, manager list, create/edit/status, item/batch/availability/component lookup.
 
-.env.example contains only INTERNAL_JWT_SECRET with an empty value. No database credentials are needed. Future protected handlers must supply this value from trusted server configuration at request time; missing/invalid token verification fails closed with 401. No private environment file was created or changed for this task, and no production secret has been provisioned.
+Configuration names: DATABASE_URL and INTERNAL_JWT_SECRET. The public .env.example contains empty placeholders only. No private configuration is provided or changed. Run npm run build:packages at root before independent dev/build; npm run dev --workspace=@unitrack/equipment uses port 3002. Root npm run dev:all starts all four apps; root checks include this workspace.
 
-lib/auth.ts exports withInternalAuth(handler, { secret, roles }). Permission checks explicitly allow profile roles or service; an authenticated identity without an allowed role receives 403. User lab authorization remains the responsibility of future domain handlers. A service identity is not automatically allowed as a user. X-Request-Id is not an identity source.
+Keyed status requests also require manual database readiness: the already-applied-in-shared-dev request_key migration plus the new unexecuted request_fingerprint migration. No setup script runs SQL.
 
-Tests invoke an actual protected GET handler in tests/fixtures/protected-route.ts, outside the app directory. That fixture uses only public dummy test credentials and is never a production endpoint. Run npm test from the root to build shared dependencies and run all suites. Unit tests make no network or database calls. See docs/architecture/service-skeletons.md at the repository root for integration scope and verification.
+See [architecture and handoff](../../docs/architecture/equipment-extraction.md) for exact endpoints, safe replay/no-op semantics, schema requirements, manual setup, tests and unverified real-auth/database flows.
