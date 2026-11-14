@@ -4,7 +4,8 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "services/*"
   ],
   "scripts": {
     "dev": "npm run dev --workspace=@unitrack/web",
@@ -13,9 +14,14 @@
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "build": "npm run build:packages && npm run build --workspace=@unitrack/web",
+    "build": "npm run build:packages && npm run build --workspaces --if-present",
     "build:packages": "npm run build --workspace=@unitrack/contracts && npm run build --workspace=@unitrack/internal-auth",
     "pretest": "npm run build:packages",
-    "pretypecheck": "npm run build:packages"
+    "pretypecheck": "npm run build:packages",
+    "predev:all": "npm run build:packages",
+    "dev:all": "concurrently --kill-others --names web,users,equipment,loans \"npm run dev --workspace=@unitrack/web -- --port 3000\" \"npm run dev --workspace=@unitrack/users\" \"npm run dev --workspace=@unitrack/equipment\" \"npm run dev --workspace=@unitrack/loans\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.5"
   }
 }

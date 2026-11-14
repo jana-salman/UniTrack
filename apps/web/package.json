@@ -20,7 +20,9 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-qr-code": "^2.2.0",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "@unitrack/contracts": "0.1.0",
+    "@unitrack/internal-auth": "0.1.0"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",

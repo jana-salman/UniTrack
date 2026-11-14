@@ -2,8 +2,9 @@
 University equipment borrowing and management system.
 
 ## Current layout
-This is one Next.js application in an npm workspace, not completed microservices.
+Business features still run in the existing web application. Three independent service skeletons expose health only; business logic has not been extracted. This is not completed microservices.
 - apps/web: pages, API routes, components, libraries, tests, public assets and app configuration.
+- services/users, services/equipment, services/loans: independently runnable Next.js skeletons with public /health and authentication helpers.
 - database: shared SQL scripts, migrations and database documentation (paths unchanged).
 - docs: project records and architecture notes.
 - Root package.json and package-lock.json: workspace commands and one dependency lockfile.
@@ -16,7 +17,8 @@ This is one Next.js application in an npm workspace, not completed microservices
 Next.js loads environment files from apps/web. The original root .env.local is preserved but is no longer the application's environment location. A private local copy was made for verification; neither file is tracked. Environment files are ignored at every depth except placeholder .env.example files. Never commit real values.
 
 ## Root commands
-- npm run dev: web development server.
+- npm run dev: existing web development server.
+- npm run dev:all: build shared packages and start web/users/equipment/loans on 3000/3001/3002/3003; Ctrl+C stops all child processes.
 - npm run typegen: generate Next.js route types before typecheck.
 - npm test: all workspace tests.
 - npm run lint: all workspace lint checks.
@@ -53,3 +55,7 @@ See [baseline, verification and return-branch integration map](docs/architecture
 ## Shared contracts and internal authentication
 
 The compiled TypeScript workspaces [@unitrack/contracts](packages/contracts/README.md) and [@unitrack/internal-auth](packages/internal-auth/README.md) provide shared identity/API types, signed internal tokens and tracing IDs. Root npm test and npm run typecheck build the packages first; npm run build builds packages before the web app. npm run build:packages builds only shared packages. Root lint checks all workspaces. The current web application does not use them yet. INTERNAL_JWT_SECRET must be supplied explicitly by future server-side callers; production provisioning remains a later setup step. No private environment files need changes for this task.
+
+## Service skeletons and gateway communication
+
+See [service skeleton setup and verification](docs/architecture/service-skeletons.md). The new .env.example entries are empty placeholders only: INTERNAL_JWT_SECRET, USERS_SERVICE_URL, EQUIPMENT_SERVICE_URL and LOANS_SERVICE_URL for future web calls; each service lists INTERNAL_JWT_SECRET only. Health/startup requires no secret. No private configuration was changed. The gateway helper is not wired into existing web routes, and existing session/profile authentication remains unchanged. Current Vercel instructions above cover the web project only; separate service deployment/provisioning remains a later task.
