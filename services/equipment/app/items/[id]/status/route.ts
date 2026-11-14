@@ -33,7 +33,7 @@ export async function PATCH(
       );
     }
 
-    const { status, reason, expectedStatus } = body as Record<string, unknown>;
+    const { status, reason, expectedStatus, expectedOperationKey, trackOperation } = body as Record<string, unknown>;
 
     if (
       typeof status !== "string" ||
@@ -47,7 +47,7 @@ export async function PATCH(
 
 
     validateStatusChange(id, status, reason);
-    const options = { expectedStatus: expectedStatus as string | string[] | undefined, idempotencyKey: request.headers.get("Idempotency-Key") ?? undefined };
+    const options = { expectedStatus: expectedStatus as string | string[] | undefined, idempotencyKey: request.headers.get("Idempotency-Key") ?? undefined, expectedOperationKey: expectedOperationKey as string | undefined, trackOperation: trackOperation as boolean | undefined };
     normalizeStatusOptions(options);
 
     if (status === "retired" && user.role !== "lab_manager") {
@@ -96,7 +96,7 @@ export async function PATCH(
 
     if (error instanceof Error) {
       if (
-        error.message === "Invalid expectedStatus" || error.message === "Invalid idempotency key" ||
+        error.message === "Invalid expected operation key" || error.message === "Invalid operation tracking option" || error.message === "Invalid expectedStatus" || error.message === "Invalid idempotency key" ||
         error.message === "Invalid equipment ID format" ||
         error.message === "Equipment ID cannot be empty" ||
         error.message === "Invalid equipment status"

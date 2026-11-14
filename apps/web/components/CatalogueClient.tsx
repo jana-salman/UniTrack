@@ -22,6 +22,7 @@ export default function CatalogueClient() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [error, setError] = useState("");
+  const [partial, setPartial] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Load the items. Runs when the search or category changes, and every 30 s.
@@ -35,6 +36,7 @@ export default function CatalogueClient() {
       }
       if (!res.ok) throw new Error("bad response");
       setItems(await res.json());
+      setPartial(res.headers.has("X-UniTrack-Partial-Data"));
       setError("");
     } catch {
       setError("Could not load the catalogue. Please try again.");
@@ -104,6 +106,7 @@ export default function CatalogueClient() {
         </select>
       </div>
 
+      {partial && <p role="status" className="text-gray-700">Some return dates are unavailable. Equipment details are still shown.</p>}
       {error && (
         <p role="alert" className="text-red-600">
           {error}

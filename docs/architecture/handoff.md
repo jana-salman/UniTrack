@@ -1,6 +1,8 @@
 # UniTrack migration handoff
 
-Current task branch: architecture/users-service, created from agreed/fetched architecture baseline a31bebd815eac20a49ea5f36ace0193cacd6cf5e with a clean tree and no remote divergence. Scope now includes Users extraction only; Loans extraction has NOT begun. Users extraction is reviewed locally and remains separate from architecture/microservices pending authorized integration. No live SQL, shared-data writes, production provisioning, deployment, push or merge was performed. Private environment files were never opened, read, copied, modified or displayed during this extraction/review.
+Current task branch: architecture/loans-service, created from the clean reviewed/fetched Users checkpoint ba735668469aa3b9d2e14272547685a7b523380c. Local/remote Users and return refs matched; no unexpected divergence. Existing return work was selectively migrated from 3f220aa090d1774f112ba888cd509bfa408461b7 without merging or changing its branch. This task implements Loans returns and catalogue due dates only, and is locally committed by the focused-review task after verification. No live SQL, shared-data writes, provisioning, deployment changes, push or merge occurred. Private environment files were not opened, read, copied, modified or displayed.
+
+**Current return implementation, migration order, retry/compensation contract and limitations:** see [loans-returns-extraction.md](loans-returns-extraction.md). Prior stage verification records below are historical. This remains a partial migration, not a completed borrowing system.
 
 ## Completed architecture stages
 
@@ -9,7 +11,9 @@ Current task branch: architecture/users-service, created from agreed/fetched arc
 3. Four independently runnable Next.js apps, process-health endpoints, auth fixtures, server-only gateway helper and Windows dev:all process management, committed as 4d988e8152e2673dbbbd5f08ba9b89a3463b1c9e.
 4. Equipment extraction and focused review committed at a31bebd815eac20a49ea5f36ace0193cacd6cf5e. See equipment-extraction.md for endpoint/role tables and detailed source provenance. This is a partial migration, not completed microservices.
 
-5. Users extraction on architecture/users-service: authenticated profile/role/name endpoints, web HTTP bootstrap, removal of web SQL/pg. See users-extraction.md; no deployment changes are included.
+5. Users extraction committed at ba735668469aa3b9d2e14272547685a7b523380c on architecture/users-service: authenticated profile/role/name endpoints, web HTTP bootstrap, removal of web SQL/pg. See users-extraction.md; no deployment changes are included.
+
+6. Loans return extraction on architecture/loans-service: authenticated returns, durable request-driven Saga, three-second Equipment HTTP adapter, staff-only gateway name aggregation and privacy-safe catalogue due dates. Reviewed return migration; see loans-returns-extraction.md.
 
 ## Running architecture
 
@@ -17,7 +21,7 @@ Browser requests retain their existing /api URLs. Web validates the existing Sup
 
 Equipment owns equipment_categories, equipment_items, kits, kit_components and equipment_status_history. Categories remain global Equipment reference data because their existing schema has no lab column; item/component operations use the signed lab. Service identities cannot masquerade as user actors. Status retirement remains manager-only. Web has no Equipment SQL or production imports of Equipment implementation. Users now owns all profile SQL. Web no longer has pg, lib/db.ts or direct profile/lab SQL. Existing pages, components and browser success shapes are preserved; QR/UI validation helpers do not access the database.
 
-Equipment provides authenticated catalogue/categories/manager-list/create/edit/status routes plus ID lookup, maximum-100-ID batch lookup, availability and component lookup. Only /health is public. Users now serves authenticated profile lookup/list/batch/role operations as detailed in users-extraction.md. Loans remains a skeleton.
+Equipment provides authenticated catalogue/categories/manager-list/create/edit/status routes plus ID lookup, maximum-100-ID batch lookup, availability and component lookup. Only /health is public. Users now serves authenticated profile lookup/list/batch/role operations as detailed in users-extraction.md. Loans now owns reservations, loans and condition_records and implements authenticated return details/confirmation and privacy-safe due dates. Web uses HTTP and read-only name/date aggregation; no direct SQL. Unbuilt reservations/handover/inspection resolution are not implemented.
 
 ## Startup commands
 
@@ -67,10 +71,10 @@ Invoke-RestMethod http://localhost:3003/health
 | Web: Equipment gateway | EQUIPMENT_SERVICE_URL, INTERNAL_JWT_SECRET |
 | Equipment | DATABASE_URL, INTERNAL_JWT_SECRET |
 | Users | DATABASE_URL, INTERNAL_JWT_SECRET |
-| Loans skeleton template | INTERNAL_JWT_SECRET (health does not require it) |
-| Reserved web template entries for later phases | LOANS_SERVICE_URL |
+| Loans | DATABASE_URL, INTERNAL_JWT_SECRET, EQUIPMENT_SERVICE_URL, LOANS_DATABASE_SESSION_AFFINITY |
+| Web: Loans returns and catalogue due dates | LOANS_SERVICE_URL, INTERNAL_JWT_SECRET |
 
-Public .env.example templates contain only placeholders. An operator must provision matching internal signing configuration for web, Users and Equipment and the correct pooled Equipment database connection, using trusted server configuration. No values or persistent credentials are supplied here. Web, Users and Equipment have separate application roots; root private configuration is not a substitute for the web/service roots. Do not copy, inspect or overwrite existing private files as part of this handoff. Missing Equipment URL/secret never falls back to local SQL or a fallback credential.
+Public .env.example templates contain only placeholders. Loans requires a direct or session-pooled database URL plus explicit session-affinity acknowledgement before creating its pool; transaction-mode pooling is incompatible with its session advisory lock. See loans-returns-extraction.md and the readiness guard. An operator must provision matching internal signing configuration for web, Users and Equipment and the correct pooled Equipment database connection, using trusted server configuration. No values or persistent credentials are supplied here. Web, Users and Equipment have separate application roots; root private configuration is not a substitute for the web/service roots. Do not copy, inspect or overwrite existing private files as part of this handoff. Missing Equipment URL/secret never falls back to local SQL or a fallback credential.
 
 ## Database readiness and migration order (none executed here)
 
@@ -80,7 +84,9 @@ Review-only text changes are in database/migrations. Application commands never 
 | --- | --- | --- | --- |
 | 0 | Baseline expanded schema and immutable-history triggers: database/schema.sql and database/triggers.sql; 002_expand_model.sql is the earlier expansion path for older databases | Do not recreate/reset the baseline; live state was not queried | An owner must establish the normal expanded baseline and triggers first; do not blindly apply both schema creation and the legacy expansion path |
 | 1 | C430PRJCT-41_status_request_key.sql | User reports already applied; do NOT rerun it | Owner reviews/applies it after baseline |
-| 2 | 003_equipment_request_fingerprint.sql | New; remains unapplied by this work | Owner reviews/applies after request_key readiness |
+| 2 | 003_equipment_request_fingerprint.sql | Remains unapplied by this work | Owner reviews/applies after request_key readiness |
+| 3 | 004_loans_return_operation.sql | Remains unapplied by this work; no live schema query | Owner reviews/applies after Equipment key/fingerprint readiness; adds nullable Loans plan JSONB, no audit rewrite |
+| 4 | 005_equipment_operation_guard.sql | Added by focused review; unapplied | After prior readiness, install nullable item ownership and item-status/history-insert triggers before enabling returns. Existing history is untouched. |
 
 The request-key file is an exact selective copy from preserved return branch 3f220aa. It adds a nullable request_key if absent and a unique partial index on non-null keys. Existing null keys are compatible. Existing non-null duplicates would prevent unique-index creation; any remediation requires a separately authorized owner decision, not deleting immutable audit history.
 
@@ -132,17 +138,11 @@ Real Supabase-to-profile-to-Equipment workflows, live PostgreSQL constraints/loc
 
 ## Temporary limitations
 
-Catalogue expectedReturn is always null until Loans aggregation. Equipment availability reports only Equipment-owned state; it does not promise a conflict-free reservation or enforce Loans windows/limits. Users/profile SQL has left web, but database roles/RLS do not yet enforce service isolation. Cross-owner foreign keys are still present. Equipment configured authenticated workflows require manual secret/URL/database/schema readiness. The UI has not been redesigned. Users and Equipment are extracted; Loans is still a skeleton.
+Catalogue expectedReturn now comes from privacy-safe Loans HTTP aggregation. Failed due-date batches retain Equipment rows with null dates, X-UniTrack-Partial-Data and a visible partial-data notice. Equipment availability reports only Equipment-owned state; it does not promise a conflict-free reservation or enforce Loans windows/limits. Users/profile SQL has left web, but database roles/RLS do not yet enforce service isolation. Cross-owner foreign keys are still present. Equipment configured authenticated workflows require manual secret/URL/database/schema readiness. The UI has not been redesigned. Users and Equipment are extracted; Loans implements returns/due dates only. Full borrowing is incomplete. See the request-driven recovery, session-affinity and unverified-live-workflow limits in loans-returns-extraction.md.
 
 ## Preserved return branch integration
 
-Branch feature/C430PRJCT-41-return-equipment stays at 3f220aa090d1774f112ba888cd509bfa408461b7; no merge/rewrite occurred.
-
-1. In a separately authorized task, integrate its added return UI/API/tests at apps/web paths and then place loan/reservation/condition-record logic in Loans. Do not recreate root app/lib/tests directories.
-2. Do not reapply its old web Equipment status transaction or import the Equipment implementation. The selectively reused request_key migration is already included under the same filename; reconcile history rather than duplicate/reapply it.
-3. Replace the return-equipment SQL/in-process adapter with authenticated Equipment HTTP calls using the verified user identity. Map lab_id to labId and component_name to name. Handle equipment_status_conflict/idempotency_key_conflict by API code, not a cross-service exception class.
-4. Review its per-attempt random operation key before retries: use a stable logical operation identity, preserve expected-status/fingerprint semantics and handle original changed/alreadyApplied results. Reconcile legacy receipts explicitly; do not rewrite immutable history.
-5. Review its actual-prior-status compensation and uncertain-commit safeguards separately. A replay may describe an old result while current Equipment state has advanced. Never blindly restore equipment after an ambiguous HTTP failure. Move and rerun return tests; add real cross-service fault/retry/reconciliation scenarios before rollout.
+Branch feature/C430PRJCT-41-return-equipment remains at 3f220aa090d1774f112ba888cd509bfa408461b7. Its return UI/logic/tests were selectively adapted to the workspace and HTTP boundaries in this task. See loans-returns-extraction.md for the file map, stable operation keys, compensation and uncertain-outcome protocol. Do not merge the old tree, duplicate the request_key migration or restore the in-process Equipment adapter. Compare future changes against that source commit and port by ownership.
 
 ## Remaining work by boundary (not implemented)
 
@@ -152,7 +152,7 @@ Users profile lookup/list/batch/role endpoints and database ownership are implem
 
 ### Loans
 
-Integrate completed Sprint 2 work, extract reservations/loans/conditions, implement overlap checks, handover/return orchestration and HTTP Equipment adapter. Add due-date/name aggregation while keeping privacy rules; restore catalogue expectedReturn only after this exists.
+Returns and due-date/name aggregation are implemented. Remaining teammate features include reservations/overlap/cancellation, handover/pickup/custody creation, inspection resolution, notifications and other unbuilt Sprint 2/3 work. Do not claim complete end-to-end borrowing. Recovery workers/operator tooling, operation-version ownership and real concurrent/fault verification remain separate integration work.
 
 ### Database isolation
 
@@ -185,3 +185,23 @@ On architecture/users-service, final typegen/tests/lint/typecheck/build passed. 
 Verified Supabase-first bootstrap, restricted service/user identities, fresh profile-derived claims, active/known/university account checks, role/lab/privacy enforcement, production SQL/import boundaries and unchanged Equipment/return-branch source. React cache is request-scoped, not a persistent profile/privilege cache; outbound fetch uses no-store. Users revalidates current actor role/lab/active state; existing Equipment JWT lifetime behavior remains unchanged.
 
 Fixed a malformed-body ordering regression: the web role gateway now sends null input to Users for validation after authorization, so a student remains forbidden (403) even with malformed JSON, while an authorized manager receives 400. A real local HTTP fixture regression covers both and confirms no UPDATE. All HTTP tests use isolated Supabase/PostgreSQL fixtures, not real logged-in/database end-to-end verification. Deployment settings and private environment files remain untouched.
+
+## Loans return task verification (current)
+
+On architecture/loans-service from ba735668469aa3b9d2e14272547685a7b523380c, final root commands all passed: npm run typegen, npm test, npm run lint (no warnings), npm run typecheck and npm run build (both packages and all four applications). Total **466 tests / 39 files**: web 127, internal-auth 63, Equipment 151, Loans 75, Users 50. The reviewed Users checkpoint had 366 tests / 31 files; all pre-existing workspace coverage is retained, and the four copied pure return suites add the original 32 return assertions. npm ls --workspaces --depth=0 and git diff --check passed. Lockfile comparison found no added/changed installed dependency versions; only Loans workspace declarations reuse existing pg/@types/pg versions.
+
+Real npm run dev:all started web/Users/Equipment/Loans on 3000/3001/3002/3003. The existing public web page and all three health endpoints returned 200. Actual Loans GET/POST /returns/:loanId and GET /loans/due-dates returned 401 without authentication and without opening the database. Ctrl+C stopped the process group; all four ports were confirmed closed. Production builds passed; production-mode authenticated startup was not exercised. The unchanged Windows startup-failure sibling cleanup was verified in the earlier skeleton phase, not repeated here.
+
+All new authenticated return/data verification uses isolated fixtures: real local HTTP and actual handlers/auth/fetch, mocked Supabase/profile bootstrap and modeled PostgreSQL. No real PostgreSQL statement, migration, constraint/lock/grant verification, shared-data write or live authenticated Supabase-to-database workflow was performed. Migrations 003/004 and new ownership migration 005 remain unapplied by this work. Request-key readiness is user-reported, not queried. A direct/session-pooled Loans database and explicit session-affinity acknowledgement are required; no private runtime configuration was changed. Durable recovery is request-driven and the cross-service/crash limits and ownership-trigger prerequisites are detailed in loans-returns-extraction.md.
+
+The focused-review task records a local commit after final verification. Users implementation and the preserved local/remote return refs are unchanged. Equipment gains only the optional return-compensation ownership guard, with ordinary response/fingerprint behavior preserved. Private/generated/dependency files are excluded from the commit. Jana's deployment work remains separate. No reservation/handover/inspection-resolution/notification feature or later phase was started.
+
+## Loans focused review findings
+
+- Confirmed Loans-only table access, web HTTP aggregation, verified assistant/same-lab return authorization, staff-only names, minimal due-date projection and catalogue retention/partial-data indication. Original return conditions, lateness, active-pickup/future-reservation distinction and duplicate handling remain covered. No complete Sprint 2 borrowing claim is made.
+- Fixed a stale-compensation defect: status equality alone allowed an ABA transition to authorize old undo. Equipment now checks expectedOperationKey under its item lock; additive migration 005 records/invalidates causal ownership atomically with status/history, including keyed no-ops and legacy writers. New return generations require the preceding undo's ownership. Existing unguarded status response/fingerprint semantics are preserved. Ownership metadata is not authorization.
+- Fixed UUID spelling allowing different advisory lock keys for the same PostgreSQL UUID. Normalized IDs/checklist order are deterministic. A durable plan write must affect exactly one loan; unknown/malformed persisted states and inconsistent completed receipts fail closed.
+- Compensation now holds the unreturned loan row lock through its HTTP undo and state commit. Stable keys survive interrupted compensation; uncertain initial/final/compensation COMMIT and unacknowledged ROLLBACK never cause speculative undo. New modeled tests cover commit response loss on both sides, missing writes, corrupted state and another completed action. Actual localhost handlers also reject stale undo after a different Equipment action returns to the same status.
+- Migrations 003/004 remain additive and nullable for existing rows, without backfilling immutable history or altering existing request_key data. Order is existing expanded schema/triggers, original request_key readiness, 003, 004, then new 005 before reviewed returns. None was executed. Validate types, indexes, triggers, grants and connection mode separately. Loans requires a direct/session-pooled connection and LOANS_DATABASE_SESSION_AFFINITY acknowledgement; a transaction-mode pooler can invalidate session locking.
+- Final focused-review verification passed all root commands: typegen, **466 tests / 39 files** (web 127, auth 63, Equipment 151, Loans 75, Users 50), lint without warnings, typecheck and builds. This adds 19 regression tests to the pre-review 447. HTTP tests use real local transport/handlers with isolated profile/database dependencies; concurrency/commit/trigger models and static SQL inspection are not real PostgreSQL proof. Extraction-stage process startup/shutdown evidence remains recorded above and was not repeated for unchanged process scripts in this review.
+- Remaining limits: no background recovery/operator UI, no distributed serializable transaction, possible inter-service change between current-state read and Loans commit, pending live Supabase/PostgreSQL/migration/trigger/pooler verification, and unbuilt reservation/handover/inspection-resolution/notification features. No production settings or private files were changed.

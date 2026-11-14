@@ -2,11 +2,11 @@
 University equipment borrowing and management system.
 
 ## Current layout
-Users and Equipment business logic run in independent services behind the existing web APIs. Web keeps Supabase sessions and university-domain checks, bootstrapping profiles through Users HTTP; Loans remains a skeleton. Web has no database driver or direct SQL. This is a partial migration, not completed microservices.
+Users and Equipment business logic run in independent services behind the existing web APIs. Web keeps Supabase sessions and university-domain checks, bootstrapping profiles through Users HTTP; Loans now implements returns and privacy-safe catalogue due dates; reservation creation, handover and inspection resolution remain unbuilt. Web has no database driver or direct SQL. This is a partial migration, not completed microservices.
 - apps/web: pages, API routes, components, libraries, tests, public assets and app configuration.
 - services/equipment: authenticated Equipment backend and public /health.
 - services/users: authenticated profile/role/name backend and public /health.
-- services/loans: independently runnable skeleton with public /health.
+- services/loans: authenticated returns/due dates, Equipment HTTP Saga and public /health.
 - database: shared SQL scripts, migrations and database documentation (paths unchanged).
 - docs: project records and architecture notes.
 - Root package.json and package-lock.json: workspace commands and one dependency lockfile.
@@ -60,11 +60,11 @@ The compiled TypeScript workspaces [@unitrack/contracts](packages/contracts/READ
 
 ## Service skeletons and gateway communication
 
-See [service skeleton setup and verification](docs/architecture/service-skeletons.md). The new .env.example entries are empty placeholders only: INTERNAL_JWT_SECRET, USERS_SERVICE_URL, EQUIPMENT_SERVICE_URL and LOANS_SERVICE_URL for future web calls; Users/Loans list INTERNAL_JWT_SECRET; Equipment also lists DATABASE_URL. Health/startup requires no secret. No private configuration was changed. Equipment routes now use the gateway helper; existing session/profile authentication remains unchanged. Current Vercel instructions above cover the web project only; separate service deployment/provisioning remains a later task.
+See [service skeleton setup and verification](docs/architecture/service-skeletons.md). The new .env.example entries are empty placeholders only: INTERNAL_JWT_SECRET, USERS_SERVICE_URL, EQUIPMENT_SERVICE_URL and LOANS_SERVICE_URL for web calls; Users and Equipment also require DATABASE_URL. Loans requires DATABASE_URL, EQUIPMENT_SERVICE_URL and LOANS_DATABASE_SESSION_AFFINITY in addition to INTERNAL_JWT_SECRET; see the current handoff for its session-pooled/direct-connection requirement. Health/startup requires no secret. No private configuration was changed. Equipment routes now use the gateway helper; existing session/profile authentication remains unchanged. Current Vercel instructions above cover the web project only; separate service deployment/provisioning remains a later task.
 
 ## Equipment extraction
 
-See [Equipment architecture, setup and return-branch handoff](docs/architecture/equipment-extraction.md). Existing browser APIs now use HTTP to Equipment; configure EQUIPMENT_SERVICE_URL and INTERNAL_JWT_SECRET for web, and DATABASE_URL and INTERNAL_JWT_SECRET for Equipment. Catalogue expectedReturn is temporarily null. Keyed status operations require the reviewed but unexecuted fingerprint migration; do not rerun the return branch request_key migration already applied to shared development. No private files, real credentials, live data or deployments were changed. Earlier skeleton records describe the preceding phase.
+See [Equipment architecture, setup and return-branch handoff](docs/architecture/equipment-extraction.md). Existing browser APIs now use HTTP to Equipment; configure EQUIPMENT_SERVICE_URL and INTERNAL_JWT_SECRET for web, and DATABASE_URL and INTERNAL_JWT_SECRET for Equipment. Catalogue expectedReturn now uses Loans HTTP aggregation, with null dates and a notice when due dates are unavailable. Keyed status operations require the reviewed but unexecuted fingerprint migration; do not rerun the return branch request_key migration already applied to shared development. No private files, real credentials, live data or deployments were changed. Earlier skeleton records describe the preceding phase.
 
 ## Current handoff
 
@@ -73,3 +73,5 @@ See [Equipment architecture, setup and return-branch handoff](docs/architecture/
 ## Users extraction
 
 See [Users extraction record](docs/architecture/users-extraction.md) and the updated [handoff](docs/architecture/handoff.md). USERS_SERVICE_URL and INTERNAL_JWT_SECRET connect web to Users; Users owns DATABASE_URL. No private configuration was changed. Supabase session and university-domain checks remain web-side. Jana owns the separate Vercel investigation; older deployment notes above were not changed or validated by this task.
+
+See [Loans return migration and recovery limitations](docs/architecture/loans-returns-extraction.md). The new return_operation migration remains unapplied; no SQL or live-data verification was performed. The preserved return branch was selectively ported, not merged.

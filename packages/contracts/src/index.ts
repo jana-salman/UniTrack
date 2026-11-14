@@ -28,3 +28,7 @@ export { EQUIPMENT_ERROR_CONTRACT } from "./equipment.js";
 
 export { isUserProfile, isProfileId, USERS_ERROR_CONTRACT } from "./users.js";
 export type { UserProfile, ProfileName } from "./users.js";
+
+export type { ConditionStatus, ReturnLoan, PickupCondition, ReturnConditionInput, ConfirmReturnInput, ReturnOutcome } from "./returns.js";
+
+export { LOANS_ERROR_CONTRACT } from "./loans.js";

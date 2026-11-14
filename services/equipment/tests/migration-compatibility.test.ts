@@ -12,3 +12,13 @@ it("fingerprint migration is additive/nullable and does not backfill immutable h
  expect(sql).toMatch(/add column if not exists request_fingerprint text/i);
  expect(sql).not.toMatch(/\b(?:update|delete|truncate|drop)\s|disable\s+trigger|not\s+null|default\s/i);
 });
+it("operation ownership migration adds nullable state and preserves immutable audit rows", () => {
+ const sql = readFileSync(new URL("005_equipment_operation_guard.sql", migrations), "utf8").replace(/--[^\n]*/g, "");
+ expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS status_request_key text/i);
+ expect(sql).toMatch(/BEFORE UPDATE OF status ON public\.equipment_items/i);
+ expect(sql).toMatch(/NEW\.status_request_key := NULL/i);
+ expect(sql).toMatch(/AFTER INSERT ON public\.equipment_status_history/i);
+ expect(sql).toMatch(/UPDATE public\.equipment_items[\s\S]*NEW\.request_key/i);
+ expect(sql).not.toMatch(/(?:UPDATE|DELETE FROM|ALTER TABLE)\s+public\.equipment_status_history|DISABLE\s+TRIGGER|\b(?:DROP|TRUNCATE)\b/i);
+ expect(sql).not.toMatch(/status_request_key text\s+(?:NOT NULL|DEFAULT)/i);
+});
