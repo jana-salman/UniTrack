@@ -22,3 +22,21 @@ it("operation ownership migration adds nullable state and preserves immutable au
  expect(sql).not.toMatch(/(?:UPDATE|DELETE FROM|ALTER TABLE)\s+public\.equipment_status_history|DISABLE\s+TRIGGER|\b(?:DROP|TRUNCATE)\b/i);
  expect(sql).not.toMatch(/status_request_key text\s+(?:NOT NULL|DEFAULT)/i);
 });
+
+it("keeps the 003-005 preflight read-only and checks the required gates", () => {
+ const sql = readFileSync(new URL("../verification/preflight_003_005.sql", migrations), "utf8");
+ const executable = sql
+  .replace(/--[^\n]*/g, "")
+  .replace(/'(?:''|[^'])*'/g, "''");
+
+ expect(executable.trim()).toMatch(/^WITH\b/i);
+ expect(executable.match(/;/g)).toHaveLength(1);
+ expect(executable).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE|GRANT|REVOKE|CALL|DO|COPY|LOCK)\b/i);
+ expect(executable).not.toMatch(/\bnextval\s*\(|pg_(?:try_)?advisory_lock|FOR\s+(?:UPDATE|SHARE)\b/i);
+ expect(sql).toContain("equipment_status_history_request_key_unique");
+ expect(sql).toContain("loans_one_active_per_item");
+ expect(sql).toContain("no_005_function_name_conflicts");
+ expect(sql).toContain("no_005_trigger_name_conflicts");
+ expect(sql).toContain("public_has_no_table_write_grants");
+ expect(sql).toContain("'00_OVERALL_' || gate || '_GATE'");
+});

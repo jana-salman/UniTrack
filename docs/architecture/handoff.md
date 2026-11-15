@@ -80,13 +80,24 @@ Public .env.example templates contain only placeholders. Loans requires a direct
 
 Review-only text changes are in database/migrations. Application commands never run migrations or seed/reset scripts.
 
+The reusable read-only remaining-prerequisite check and ordered staging plan are
+in [database/verification/preflight_003_005.sql](../../database/verification/preflight_003_005.sql)
+and [database/MIGRATIONS_003_005.md](../../database/MIGRATIONS_003_005.md).
+They do not execute migrations or replace owner approval.
+
+Subsequent owner-reported read-only verification confirmed all ten baseline
+tables, the nullable request-key column and correct valid/ready unique partial
+index, and all four enabled baseline protection triggers. The 003, 004 and 005
+target columns were absent. The extraction-stage statements below that no live
+query had yet occurred remain historical evidence for that earlier task.
+
 | Order | File/readiness | Existing shared development | Fresh database |
 | --- | --- | --- | --- |
-| 0 | Baseline expanded schema and immutable-history triggers: database/schema.sql and database/triggers.sql; 002_expand_model.sql is the earlier expansion path for older databases | Do not recreate/reset the baseline; live state was not queried | An owner must establish the normal expanded baseline and triggers first; do not blindly apply both schema creation and the legacy expansion path |
-| 1 | C430PRJCT-41_status_request_key.sql | User reports already applied; do NOT rerun it | Owner reviews/applies it after baseline |
-| 2 | 003_equipment_request_fingerprint.sql | Remains unapplied by this work | Owner reviews/applies after request_key readiness |
-| 3 | 004_loans_return_operation.sql | Remains unapplied by this work; no live schema query | Owner reviews/applies after Equipment key/fingerprint readiness; adds nullable Loans plan JSONB, no audit rewrite |
-| 4 | 005_equipment_operation_guard.sql | Added by focused review; unapplied | After prior readiness, install nullable item ownership and item-status/history-insert triggers before enabling returns. Existing history is untouched. |
+| 0 | Baseline expanded schema and immutable-history triggers: database/schema.sql and database/triggers.sql; 002_expand_model.sql is the earlier expansion path for older databases | Owner reports all ten tables and four baseline protection triggers verified; do not recreate/reset the baseline | An owner must establish the normal expanded baseline and triggers first; do not blindly apply both schema creation and the legacy expansion path |
+| 1 | C430PRJCT-41_status_request_key.sql | Owner reports nullable text column and correct valid/ready unique partial index verified; do NOT rerun it | Owner reviews/applies it after baseline |
+| 2 | 003_equipment_request_fingerprint.sql | Target column verified absent; remains unapplied | Owner reviews/applies after request_key readiness |
+| 3 | 004_loans_return_operation.sql | Target column verified absent; remains unapplied | Owner reviews/applies after Equipment key/fingerprint readiness; adds nullable Loans plan JSONB, no audit rewrite |
+| 4 | 005_equipment_operation_guard.sql | Target column verified absent; remains unapplied | After prior readiness, install nullable item ownership and item-status/history-insert triggers before enabling returns. Existing history is untouched. |
 
 The request-key file is an exact selective copy from preserved return branch 3f220aa. It adds a nullable request_key if absent and a unique partial index on non-null keys. Existing null keys are compatible. Existing non-null duplicates would prevent unique-index creation; any remediation requires a separately authorized owner decision, not deleting immutable audit history.
 
