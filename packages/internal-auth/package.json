@@ -1,0 +1,32 @@
+{
+  "name": "@unitrack/internal-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.4",
+    "typescript": "^5",
+    "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "@unitrack/contracts": "0.1.0",
+    "jose": "^6.1.0"
+  }
+}

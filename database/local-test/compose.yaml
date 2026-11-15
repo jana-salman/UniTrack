@@ -1,0 +1,25 @@
+name: unitrack-migration-test
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: unitrack_test
+      POSTGRES_USER: unitrack_local_test
+      POSTGRES_PASSWORD: local_test_only
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unitrack_local_test -d unitrack_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - ../:/workspace/database:ro
+      - ./00_supabase_compat.sql:/docker-entrypoint-initdb.d/00_supabase_compat.sql:ro
+      - ../schema.sql:/docker-entrypoint-initdb.d/10_schema.sql:ro
+      - ../triggers.sql:/docker-entrypoint-initdb.d/20_triggers.sql:ro
+      - ../migrations/C430PRJCT-41_status_request_key.sql:/docker-entrypoint-initdb.d/30_request_key.sql:ro
+      - ./10_synthetic_baseline.sql:/docker-entrypoint-initdb.d/40_synthetic_baseline.sql:ro
