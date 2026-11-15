@@ -98,7 +98,7 @@ query had yet occurred remain historical evidence for that earlier task.
 | 2 | 003_equipment_request_fingerprint.sql | Owner reports applied and postflight verified | Do not rerun; nullable fingerprint metadata is present |
 | 3 | 004_loans_return_operation.sql | Owner reports applied and postflight verified | Do not rerun; nullable Loans plan JSONB is present |
 | 4 | 005_equipment_operation_guard.sql | Owner reports applied and postflight verified | Do not rerun; nullable ownership and both enabled ownership triggers are present |
-| 5 | 006_service_database_isolation.sql | Proposed and locally verified; remains unapplied | Review separately after 005 and after the real grant/policy inventories. Provision private login-role membership outside source control; do not apply automatically with 003-005. |
+| 5 | 006_service_database_isolation.sql | Locally verified; activation plan approved but production execution postponed | Apply only during a later controlled activation after the real grant/policy inventory. Provision private login-role membership outside source control; do not apply automatically. |
 
 The request-key file is an exact selective copy from preserved return branch 3f220aa. It adds a nullable request_key if absent and a unique partial index on non-null keys. Existing null keys are compatible. Existing non-null duplicates would prevent unique-index creation; any remediation requires a separately authorized owner decision, not deleting immutable audit history.
 
@@ -294,7 +294,8 @@ extracted service boundaries implemented here.
   inherited/owner roles, removes public schema creation, and verifies the exact
   table/sequence grant matrix. A disposable fixture with deliberately excessive
   pre-existing privileges passes migrations 003-006 and positive/negative RLS
-  checks. Migration 006 is still unapplied and requires owner review.
+  checks. Its activation plan is approved, but migration 006 remains unapplied
+  and production role/connection provisioning is intentionally postponed.
 - Final verification passed route type generation, **477 tests** (with the 3
   Docker-gated tests also passing in the disposable migration run), lint,
   TypeScript, and production builds for all four applications. The earlier
@@ -303,6 +304,13 @@ extracted service boundaries implemented here.
 
 The architecture is locally complete for the implemented Users, Equipment,
 catalogue, due-date, and return scope. Deployment readiness still requires
-migration 006 approval/provisioning, private service configuration, four aligned
+migration 006 activation/provisioning, private service configuration, four aligned
 deployments, and a hosted authenticated smoke test. The unimplemented borrowing
 features listed above remain product scope, not hidden monolithic code paths.
+
+Production database isolation is therefore not active: the shared Supabase
+project has not received migration 006, private runtime roles/memberships have
+not been provisioned, and no service has been switched to a restricted database
+connection. After a future controlled activation, run
+`database/verification/postflight_006_read_only.sql`; all PASS/FAIL rows must
+pass before deployment proceeds.
