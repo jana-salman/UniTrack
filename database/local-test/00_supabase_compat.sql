@@ -4,6 +4,10 @@
 
 CREATE ROLE anon NOLOGIN;
 CREATE ROLE authenticated NOLOGIN;
+-- One safe pre-existing group exercises migration 006's normalization path;
+-- 006 creates the other two groups itself.
+CREATE ROLE unitrack_users_service
+  NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 
 CREATE SCHEMA auth;
 

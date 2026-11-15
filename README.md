@@ -75,7 +75,7 @@ See [service skeleton setup and verification](docs/architecture/service-skeleton
 
 ## Equipment extraction
 
-See [Equipment architecture, setup and return-branch handoff](docs/architecture/equipment-extraction.md). Existing browser APIs now use HTTP to Equipment; configure EQUIPMENT_SERVICE_URL and INTERNAL_JWT_SECRET for web, and DATABASE_URL and INTERNAL_JWT_SECRET for Equipment. Catalogue expectedReturn now uses Loans HTTP aggregation, with null dates and a notice when due dates are unavailable. Keyed status operations require the reviewed but unexecuted fingerprint migration; do not rerun the return branch request_key migration already applied to shared development. No private files, real credentials, live data or deployments were changed. Earlier skeleton records describe the preceding phase.
+See [Equipment architecture, setup and return-branch handoff](docs/architecture/equipment-extraction.md). Existing browser APIs use HTTP to Equipment; configure EQUIPMENT_SERVICE_URL and INTERNAL_JWT_SECRET for web, and DATABASE_URL and INTERNAL_JWT_SECRET for Equipment. Catalogue expectedReturn uses Loans HTTP aggregation, with null dates and a notice when due dates are unavailable. The database owner reports the request-key prerequisite and migrations 003-005 applied and postflight verified. No application command runs migrations. Earlier skeleton records describe the preceding phase.
 
 ## Current handoff
 
@@ -85,4 +85,4 @@ See [Equipment architecture, setup and return-branch handoff](docs/architecture/
 
 See [Users extraction record](docs/architecture/users-extraction.md) and the updated [handoff](docs/architecture/handoff.md). USERS_SERVICE_URL and INTERNAL_JWT_SECRET connect web to Users; Users owns its DATABASE_URL. No private configuration was changed. Supabase session and university-domain checks remain web-side.
 
-See [Loans return migration and recovery limitations](docs/architecture/loans-returns-extraction.md). Migrations 003-005 and service isolation 006 pass disposable PostgreSQL verification but remain unapplied to the shared Supabase database. The preserved return branch was selectively ported, not merged.
+See [Loans return migration and recovery limitations](docs/architecture/loans-returns-extraction.md). Migrations 003-005 are owner-reported applied and verified on shared Supabase. Service isolation 006 remains unapplied and must be reviewed separately. The preserved return branch was selectively ported, not merged.

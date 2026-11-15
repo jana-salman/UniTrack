@@ -1,5 +1,10 @@
 # Migrations 003-005 verification and staging runbook
 
+> Current status: the database owner reports migrations 003, 004, and 005
+> applied successfully to shared Supabase and verified with
+> `database/verification/postflight_003_005.sql`. The execution procedure below
+> remains the recovery/audit record; do not rerun applied migration files.
+
 This runbook finishes the database-readiness work already recorded in
 `docs/architecture/handoff.md`. It does not replace the established baseline
 verification and does not authorize access to or changes in Supabase.
@@ -110,9 +115,11 @@ Supabase Auth and connection-mode checks. See
 
 `database/migrations/006_service_database_isolation.sql` is a separate,
 password-free isolation migration. It creates three non-login, non-bypass group
-roles, grants only current service operations, removes PUBLIC and (when present)
-Supabase `anon`/`authenticated` table and sequence grants, and adds explicit RLS
-policies. It passed the disposable local role/grant/RLS checks in
+roles, normalizes their schema/table/sequence privileges before granting only
+current service operations, removes public schema creation plus PUBLIC and
+(when present) Supabase `anon`/`authenticated` direct access, rejects inherited
+or owner group roles, and adds explicit RLS policies. It passed the disposable
+local role/grant/RLS checks in
 `database/local-test/verify_006.sql`.
 
 Do not apply 006 automatically with 003-005. Before approval, review the real

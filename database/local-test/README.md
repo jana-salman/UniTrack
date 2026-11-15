@@ -17,7 +17,10 @@ migration, SQL assertion, or focused application test.
 `00_supabase_compat.sql` supplies the `auth.users(id)` object and synthetic
 `anon`/`authenticated` roles needed to exercise the Supabase-specific revoke
 path. The baseline gives those roles disposable privileges and 006 verification
-proves they are removed. PostgreSQL 16 supplies `gen_random_uuid()`. The current
+proves they are removed. It also gives one safe pre-existing service group
+deliberately excessive disposable privileges so 006 must normalize them; the
+other two service groups exercise the creation path. PostgreSQL 16 supplies
+`gen_random_uuid()`. The current
 schema and migrations use no other Supabase-only database object. This is not a
 Supabase Auth emulator and does not verify JWT claims, Supabase API behavior,
 hosted backups, login-role membership, or pooler configuration.

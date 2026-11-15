@@ -47,6 +47,10 @@ it("keeps service isolation password-free and scoped to explicit UniTrack object
 
  expect(executable).toMatch(/CREATE ROLE %I NOLOGIN[\s\S]*NOBYPASSRLS/i);
  expect(executable).not.toMatch(/\bPASSWORD\b|ALL TABLES IN SCHEMA|ALL SEQUENCES IN SCHEMA/i);
+ expect(executable).toMatch(/pg_auth_members[\s\S]*service group role inherits another role/i);
+ expect(executable).toMatch(/REVOKE ALL PRIVILEGES ON SCHEMA public FROM[\s\S]*unitrack_loans_service/i);
+ expect(executable).toMatch(/REVOKE CREATE ON SCHEMA public FROM PUBLIC/i);
+ expect(executable).toMatch(/REVOKE ALL PRIVILEGES ON TABLE[\s\S]*FROM[\s\S]*unitrack_users_service[\s\S]*unitrack_equipment_service[\s\S]*unitrack_loans_service/i);
  expect(executable).toContain("public.equipment_status_history");
  expect(executable).toContain("public.equipment_status_history_id_seq");
  expect(executable).toMatch(/GRANT SELECT ON public\.labs TO unitrack_users_service/i);

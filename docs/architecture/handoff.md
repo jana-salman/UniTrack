@@ -95,9 +95,9 @@ query had yet occurred remain historical evidence for that earlier task.
 | --- | --- | --- | --- |
 | 0 | Baseline expanded schema and immutable-history triggers: database/schema.sql and database/triggers.sql; 002_expand_model.sql is the earlier expansion path for older databases | Owner reports all ten tables and four baseline protection triggers verified; do not recreate/reset the baseline | An owner must establish the normal expanded baseline and triggers first; do not blindly apply both schema creation and the legacy expansion path |
 | 1 | C430PRJCT-41_status_request_key.sql | Owner reports nullable text column and correct valid/ready unique partial index verified; do NOT rerun it | Owner reviews/applies it after baseline |
-| 2 | 003_equipment_request_fingerprint.sql | Target column verified absent; remains unapplied | Owner reviews/applies after request_key readiness |
-| 3 | 004_loans_return_operation.sql | Target column verified absent; remains unapplied | Owner reviews/applies after Equipment key/fingerprint readiness; adds nullable Loans plan JSONB, no audit rewrite |
-| 4 | 005_equipment_operation_guard.sql | Target column verified absent; remains unapplied | After prior readiness, install nullable item ownership and item-status/history-insert triggers before enabling returns. Existing history is untouched. |
+| 2 | 003_equipment_request_fingerprint.sql | Owner reports applied and postflight verified | Do not rerun; nullable fingerprint metadata is present |
+| 3 | 004_loans_return_operation.sql | Owner reports applied and postflight verified | Do not rerun; nullable Loans plan JSONB is present |
+| 4 | 005_equipment_operation_guard.sql | Owner reports applied and postflight verified | Do not rerun; nullable ownership and both enabled ownership triggers are present |
 | 5 | 006_service_database_isolation.sql | Proposed and locally verified; remains unapplied | Review separately after 005 and after the real grant/policy inventories. Provision private login-role membership outside source control; do not apply automatically with 003-005. |
 
 The request-key file is an exact selective copy from preserved return branch 3f220aa. It adds a nullable request_key if absent and a unique partial index on non-null keys. Existing null keys are compatible. Existing non-null duplicates would prevent unique-index creation; any remediation requires a separately authorized owner decision, not deleting immutable audit history.
@@ -235,7 +235,8 @@ those paragraphs remain as historical evidence for their original checkpoints.
   identity and a validated request ID. Gateway and service authorization remain
   enforced at each boundary.
 - Migrations 003-005, their indexes/triggers, replay/ownership behavior, and the
-  return Saga pass disposable PostgreSQL testing. Proposed migration 006 adds
+  return Saga pass disposable PostgreSQL testing; the owner subsequently
+  reported 003-005 applied and postflight verified on shared Supabase. Proposed migration 006 adds
   password-free group roles, least-privilege grants, and operation-specific RLS
   policies; positive owned-table and negative cross-owner checks pass locally.
 
@@ -280,3 +281,28 @@ authenticated smoke test. Reservation creation/overlap/cancellation, pickup/
 handover, inspection resolution, notifications, background recovery/operator
 UI, and other Sprint features are product backlog and do not invalidate the
 extracted service boundaries implemented here.
+
+### Local completion review
+
+- Web, Loans, and the return UI now validate successful Equipment, Users, and
+  Loans payloads with shared runtime wire contracts. Invalid success payloads
+  fail as sanitized gateway/service errors; Loans classifies Equipment HTTP
+  errors before parsing their bodies, preserving deterministic 404/409 results.
+- Web remains database-free, and each backend queries only its owned tables.
+  Obsolete database-pool proxies and duplicate return type shims were removed.
+- Migration 006 now normalizes safe pre-existing service-group grants, rejects
+  inherited/owner roles, removes public schema creation, and verifies the exact
+  table/sequence grant matrix. A disposable fixture with deliberately excessive
+  pre-existing privileges passes migrations 003-006 and positive/negative RLS
+  checks. Migration 006 is still unapplied and requires owner review.
+- Final verification passed route type generation, **477 tests** (with the 3
+  Docker-gated tests also passing in the disposable migration run), lint,
+  TypeScript, and production builds for all four applications. The earlier
+  localhost four-process workflow remains valid; unchanged startup scripts were
+  not rerun.
+
+The architecture is locally complete for the implemented Users, Equipment,
+catalogue, due-date, and return scope. Deployment readiness still requires
+migration 006 approval/provisioning, private service configuration, four aligned
+deployments, and a hosted authenticated smoke test. The unimplemented borrowing
+features listed above remain product scope, not hidden monolithic code paths.

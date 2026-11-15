@@ -6,6 +6,11 @@ BEGIN;
 -- away from Supabase's browser-facing roles. They never leave this container.
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO anon, authenticated;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+-- Deliberately excessive disposable privileges prove 006 normalizes a safe
+-- pre-existing service group before installing the reviewed matrix.
+GRANT CREATE ON SCHEMA public TO unitrack_users_service;
+GRANT ALL PRIVILEGES ON public.equipment_items TO unitrack_users_service;
+GRANT USAGE, SELECT ON public.equipment_categories_id_seq TO unitrack_users_service;
 
 INSERT INTO auth.users (id) VALUES
   ('00000000-0000-4000-8000-000000000001'),

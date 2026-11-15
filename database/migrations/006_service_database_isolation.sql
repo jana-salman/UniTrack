@@ -33,10 +33,95 @@ BEGIN
       RAISE EXCEPTION 'Existing role % has unsafe attributes; stop for owner review', role_name;
     END IF;
   END LOOP;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_auth_members AS membership
+    JOIN pg_roles AS member_role ON member_role.oid = membership.member
+    WHERE member_role.rolname IN (
+      'unitrack_users_service',
+      'unitrack_equipment_service',
+      'unitrack_loans_service'
+    )
+  ) THEN
+    RAISE EXCEPTION 'A service group role inherits another role; stop for owner review';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_class AS object
+    JOIN pg_namespace AS namespace ON namespace.oid = object.relnamespace
+    JOIN pg_roles AS owner_role ON owner_role.oid = object.relowner
+    WHERE namespace.nspname = 'public'
+      AND owner_role.rolname IN (
+        'unitrack_users_service',
+        'unitrack_equipment_service',
+        'unitrack_loans_service'
+      )
+      AND object.relname IN (
+        'labs',
+        'equipment_categories',
+        'profiles',
+        'equipment_items',
+        'kits',
+        'kit_components',
+        'reservations',
+        'loans',
+        'condition_records',
+        'equipment_status_history'
+      )
+  ) THEN
+    RAISE EXCEPTION 'A service group role owns a UniTrack table; stop for owner review';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_namespace AS namespace
+    JOIN pg_roles AS owner_role ON owner_role.oid = namespace.nspowner
+    WHERE namespace.nspname = 'public'
+      AND owner_role.rolname IN (
+        'unitrack_users_service',
+        'unitrack_equipment_service',
+        'unitrack_loans_service'
+      )
+  ) THEN
+    RAISE EXCEPTION 'A service group role owns schema public; stop for owner review';
+  END IF;
 END;
 $$;
 
+REVOKE ALL PRIVILEGES ON SCHEMA public FROM
+  unitrack_users_service,
+  unitrack_equipment_service,
+  unitrack_loans_service;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO
+  unitrack_users_service,
+  unitrack_equipment_service,
+  unitrack_loans_service;
+
+-- Normalize any safe pre-existing group roles before granting the reviewed
+-- matrix. This prevents an old direct grant from silently surviving 006.
+REVOKE ALL PRIVILEGES ON TABLE
+  public.labs,
+  public.equipment_categories,
+  public.profiles,
+  public.equipment_items,
+  public.kits,
+  public.kit_components,
+  public.reservations,
+  public.loans,
+  public.condition_records,
+  public.equipment_status_history
+FROM
+  unitrack_users_service,
+  unitrack_equipment_service,
+  unitrack_loans_service;
+REVOKE ALL PRIVILEGES ON SEQUENCE
+  public.labs_id_seq,
+  public.equipment_categories_id_seq,
+  public.equipment_status_history_id_seq
+FROM
   unitrack_users_service,
   unitrack_equipment_service,
   unitrack_loans_service;
@@ -72,6 +157,10 @@ DECLARE
 BEGIN
   FOREACH browser_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = browser_role) THEN
+      EXECUTE format(
+        'REVOKE CREATE ON SCHEMA public FROM %I',
+        browser_role
+      );
       EXECUTE format(
         'REVOKE ALL PRIVILEGES ON TABLE public.labs, public.equipment_categories, public.profiles, public.equipment_items, public.kits, public.kit_components, public.reservations, public.loans, public.condition_records, public.equipment_status_history FROM %I',
         browser_role
