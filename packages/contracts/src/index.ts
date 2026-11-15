@@ -24,11 +24,28 @@ export interface ServiceIdentity {
 }
 export type InternalIdentity = UserIdentity | ServiceIdentity;
 
-export { EQUIPMENT_ERROR_CONTRACT } from "./equipment.js";
+export {
+  EQUIPMENT_ERROR_CONTRACT,
+  EQUIPMENT_STATUSES,
+  isCatalogueItem,
+  isEquipmentComponentSnapshot,
+  isEquipmentItemSnapshot,
+  isEquipmentStatus,
+  isEquipmentStatusChangeResult,
+} from "./equipment.js";
+export type {
+  CatalogueItem,
+  EquipmentComponentSnapshot,
+  EquipmentItemSnapshot,
+  EquipmentStatus,
+  EquipmentStatusChangeResult,
+} from "./equipment.js";
 
-export { isUserProfile, isProfileId, USERS_ERROR_CONTRACT } from "./users.js";
+export { isUserProfile, isProfileId, isProfileName, USERS_ERROR_CONTRACT } from "./users.js";
 export type { UserProfile, ProfileName } from "./users.js";
 
-export type { ConditionStatus, ReturnLoan, PickupCondition, ReturnConditionInput, ConfirmReturnInput, ReturnOutcome } from "./returns.js";
+export { isConditionStatus, isReturnDetails, isReturnOutcome } from "./returns.js";
+export type { ConditionStatus, ReturnLoan, ReturnLoanWire, ReturnDetails, PickupCondition, ReturnConditionInput, ConfirmReturnInput, ReturnOutcome } from "./returns.js";
 
-export { LOANS_ERROR_CONTRACT } from "./loans.js";
+export { isLoanDueDate, LOANS_ERROR_CONTRACT } from "./loans.js";
+export type { LoanDueDate } from "./loans.js";

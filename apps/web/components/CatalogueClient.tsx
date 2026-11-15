@@ -3,21 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import StatusBadge from "@/components/StatusBadge";
 import { useRouter } from "next/navigation";
-
-type Item = {
-  id: string;
-  assetCode: string;
-  name: string;
-  category: string;
-  status: string;
-  expectedReturn: string | null;
-};
+import { isCatalogueItem, type CatalogueItem } from "@unitrack/contracts";
 
 const REFRESH_MS = 30_000; // refresh every 30 s, so changes show within 1 minute
 
 export default function CatalogueClient() {
   const router = useRouter();
-  const [items, setItems] = useState<Item[]>([]);
+  const [items, setItems] = useState<CatalogueItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
@@ -35,7 +27,9 @@ export default function CatalogueClient() {
         return;
       }
       if (!res.ok) throw new Error("bad response");
-      setItems(await res.json());
+      const data: unknown = await res.json();
+      if (!Array.isArray(data) || !data.every(isCatalogueItem)) throw new Error("invalid catalogue response");
+      setItems(data);
       setPartial(res.headers.has("X-UniTrack-Partial-Data"));
       setError("");
     } catch {
@@ -66,8 +60,10 @@ export default function CatalogueClient() {
       } catch {
         const res = await fetch("/api/items");
         if (res.ok) {
-          const all: Item[] = await res.json();
-          setCategories([...new Set(all.map((i) => i.category))].sort());
+          const all: unknown = await res.json();
+          if (Array.isArray(all) && all.every(isCatalogueItem)) {
+            setCategories([...new Set(all.map((i) => i.category))].sort());
+          }
         }
       }
     })();

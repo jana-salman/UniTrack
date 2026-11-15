@@ -4,7 +4,7 @@ import { getCatalogue } from "../../lib/catalogue-query";
 import { requireRole } from "../../lib/auth/authorization";
 import { AuthorizationError } from "../../lib/auth/errors";
 
-import { pool } from "../../lib/db";
+import { getDatabasePool } from "../../lib/db";
 import { createEquipment } from "../../lib/equipment-queries";
 import {
   validateCreateEquipmentInput,
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
 
     // Save the equipment in PostgreSQL.
     const created = await createEquipment(
-      pool,
+      getDatabasePool(),
       equipment as CreateEquipmentInput,
       manager.id
     );

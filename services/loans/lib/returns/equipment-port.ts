@@ -1,14 +1,5 @@
-import type { ReturnStatus } from "./rules";
-
-export type EquipmentStatus =
-  | "available"
-  | "reserved"
-  | "checked_out"
-  | "inspection_required"
-  | "under_maintenance"
-  | "retired"
-  | "lost"
-  | "overdue";
+import type { EquipmentStatus } from "@unitrack/contracts";
+export type { EquipmentStatus, ReturnOutcome } from "@unitrack/contracts";
 
 export interface ReturnEquipmentItem {
   id: string;
@@ -42,13 +33,6 @@ export interface ReturnEquipmentPort {
     itemId: string,
     labId: number,
   ): Promise<ReturnEquipmentComponent[]>;
-}
-
-export interface ReturnOutcome {
-  loanId: string;
-  returnedAt: string;
-  status: ReturnStatus;
-  isLate: boolean;
 }
 
 export interface ReturnEquipmentComponent {

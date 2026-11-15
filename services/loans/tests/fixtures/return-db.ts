@@ -8,7 +8,7 @@ export const borrowerId = "550e8400-e29b-41d4-a716-446655440003";
 export function returnDatabase() {
   const state = {
     loan: { id: loanId, item_id: itemId, borrower_id: borrowerId, reservation_id: null, lab_id: 7, borrowed_at: new Date("2000-01-01"), due_date: new Date("2100-01-01"), returned_at: null as Date | null, return_operation: null as unknown },
-    pickup: [{ id: "pickup", kit_component_id: null, condition_status: "good", notes: null }] as PickupCondition[],
+    pickup: [{ id: "550e8400-e29b-41d4-a716-446655440010", kit_component_id: null, condition_status: "good", notes: null }] as PickupCondition[],
     records: [] as unknown[][],
   };
   let locked = false;

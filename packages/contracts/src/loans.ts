@@ -1,3 +1,17 @@
+export interface LoanDueDate {
+  itemId: string;
+  dueDate: string;
+}
+
+export function isLoanDueDate(value: unknown): value is LoanDueDate {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const dueDate = value as Record<string, unknown>;
+  return typeof dueDate.itemId === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(dueDate.itemId)
+    && typeof dueDate.dueDate === "string"
+    && Number.isFinite(Date.parse(dueDate.dueDate));
+}
+
 // Approved wire vocabulary only. No persistence or business implementation.
 export const LOANS_ERROR_CONTRACT = {
   messages: [

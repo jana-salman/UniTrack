@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { signInternalToken } from "@unitrack/internal-auth";
 vi.mock("server-only", () => ({}));
 const { query, connect } = vi.hoisted(() => ({ query: vi.fn(), connect: vi.fn() }));
-vi.mock("../lib/db", () => ({ pool: { query }, getDatabasePool: () => ({ query, connect }) }));
+vi.mock("../lib/db", () => ({ getDatabasePool: () => ({ query, connect }) }));
 import { GET as catalogue, POST as create } from "../app/items/route";
 import { GET as categories, POST as addCategory } from "../app/categories/route";
 import { GET as manager } from "../app/manager/equipment/route";

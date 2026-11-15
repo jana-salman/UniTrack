@@ -1,14 +1,6 @@
 import { getDatabasePool } from "./db";
 import { getEquipmentStatusLabel } from "./equipment-status";
-
-export type CatalogueItem = {
-  id: string; // database UUID
-  assetCode: string; // the code staff see and QR labels use, e.g. CAM-001
-  name: string;
-  category: string;
-  status: string; // label: Available, Reserved, Borrowed, Inspection Required, Under Repair
-  expectedReturn: string | null;
-};
+import type { CatalogueItem } from "@unitrack/contracts";
 
 // Tables from JS's Supabase database:
 //   equipment_items(id, asset_code, name, description, serial_number,

@@ -1,4 +1,90 @@
-// Approved wire vocabulary; validation remains in Equipment.
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+export const EQUIPMENT_STATUSES = [
+  "available",
+  "reserved",
+  "checked_out",
+  "inspection_required",
+  "under_maintenance",
+  "retired",
+  "lost",
+  "overdue",
+] as const;
+
+export type EquipmentStatus = (typeof EQUIPMENT_STATUSES)[number];
+
+export function isEquipmentStatus(value: unknown): value is EquipmentStatus {
+  return typeof value === "string" && EQUIPMENT_STATUSES.includes(value as EquipmentStatus);
+}
+
+export interface CatalogueItem {
+  id: string;
+  assetCode: string;
+  name: string;
+  category: string;
+  status: string;
+  expectedReturn: string | null;
+}
+
+export function isCatalogueItem(value: unknown): value is CatalogueItem {
+  if (!isRecord(value)) return false;
+  return isUuid(value.id)
+    && typeof value.assetCode === "string"
+    && typeof value.name === "string"
+    && typeof value.category === "string"
+    && typeof value.status === "string"
+    && (value.expectedReturn === null
+      || (typeof value.expectedReturn === "string" && Number.isFinite(Date.parse(value.expectedReturn))));
+}
+
+export interface EquipmentItemSnapshot {
+  id: string;
+  name: string;
+  lab_id: number;
+  status: EquipmentStatus;
+}
+
+export function isEquipmentItemSnapshot(value: unknown): value is EquipmentItemSnapshot {
+  if (!isRecord(value)) return false;
+  return isUuid(value.id)
+    && typeof value.name === "string"
+    && Number.isSafeInteger(value.lab_id)
+    && (value.lab_id as number) > 0
+    && isEquipmentStatus(value.status);
+}
+
+export interface EquipmentComponentSnapshot {
+  id: string;
+  component_name: string;
+}
+
+export function isEquipmentComponentSnapshot(value: unknown): value is EquipmentComponentSnapshot {
+  return isRecord(value) && isUuid(value.id) && typeof value.component_name === "string";
+}
+
+export interface EquipmentStatusChangeResult {
+  itemId: string;
+  status: EquipmentStatus;
+  changed: boolean;
+}
+
+export function isEquipmentStatusChangeResult(value: unknown): value is EquipmentStatusChangeResult {
+  return isRecord(value)
+    && isUuid(value.itemId)
+    && isEquipmentStatus(value.status)
+    && typeof value.changed === "boolean";
+}
+
+// Approved error vocabulary; domain validation remains in Equipment.
 export const EQUIPMENT_ERROR_CONTRACT = {
   "messages": [
     "Equipment database is not configured.",

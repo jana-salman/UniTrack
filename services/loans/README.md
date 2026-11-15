@@ -1,11 +1,28 @@
-# loans service skeleton
+# Loans Service
 
-Independent Next.js application exposing only public GET /health with service, status and package version. No SQL, domain routes or downstream calls exist. Health remains available without configuration and reveals no configuration values.
+Independent authenticated Next.js Loans backend. It owns `loans`,
+`reservations`, and `condition_records`; it never queries Users or Equipment
+tables. Current routes provide same-lab due dates and the recoverable return
+workflow. Returns call Equipment over signed HTTP with stable idempotency keys.
+Web aggregates borrower/equipment labels through the owning services.
 
-From the repository root, run npm install, then npm run build:packages. Run npm run dev --workspace=@unitrack/loans for this app alone, or npm run dev:all for all four apps. Its fixed development/start port is 3003. Build with npm run build --workspace=@unitrack/loans; npm run start --workspace=@unitrack/loans serves that build on the same port.
+Public `GET /health` is configuration-free. Business routes require verified
+internal user tokens and enforce role/lab scope. Configuration names are
+`INTERNAL_JWT_SECRET`, `DATABASE_URL`, `EQUIPMENT_SERVICE_URL`, and
+`LOANS_DATABASE_SESSION_AFFINITY=confirmed`. The database URL must use a direct
+or session-pooled connection because the return Saga holds a session advisory
+lock across commits; transaction pooling is incompatible.
 
-.env.example contains only INTERNAL_JWT_SECRET with an empty value. No database credentials are needed. Future protected handlers must supply this value from trusted server configuration at request time; missing/invalid token verification fails closed with 401. No private environment file was created or changed for this task, and no production secret has been provisioned.
+The database owner reports migrations 003-005 applied and verified. Proposed
+service-isolation migration 006 remains unapplied and is never run by the
+application. The return operation is request-recoverable; background operator
+recovery remains product/operations work rather than a hidden startup task.
 
-lib/auth.ts exports withInternalAuth(handler, { secret, roles }). Permission checks explicitly allow profile roles or service; an authenticated identity without an allowed role receives 403. User lab authorization remains the responsibility of future domain handlers. A service identity is not automatically allowed as a user. X-Request-Id is not an identity source.
+From the repository root, build shared packages before independent use. Run
+`npm run dev --workspace=@unitrack/loans` on port 3003, or `npm run dev:all` for
+all four applications. Root typegen, test, lint, typecheck, and build commands
+include this workspace. Tests use synthetic credentials and isolated database
+fixtures only.
 
-Tests invoke an actual protected GET handler in tests/fixtures/protected-route.ts, outside the app directory. That fixture uses only public dummy test credentials and is never a production endpoint. Run npm test from the root to build shared dependencies and run all suites. Unit tests make no network or database calls. See docs/architecture/service-skeletons.md at the repository root for integration scope and verification.
+See [Loans return architecture](../../docs/architecture/loans-returns-extraction.md)
+and the current [handoff](../../docs/architecture/handoff.md).

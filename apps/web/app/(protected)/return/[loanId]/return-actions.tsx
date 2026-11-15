@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 
-import type { ReturnOutcome } from "@/lib/returns/equipment-port";
-import type {
-  ConfirmReturnInput,
-  PickupCondition,
-} from "@/lib/returns/types";
+import {
+  isReturnOutcome,
+  type ReturnOutcome,
+  type ConfirmReturnInput,
+  type PickupCondition,
+} from "@unitrack/contracts";
 import ReturnForm from "./return-form";
 
 interface ReturnActionsProps {
@@ -63,14 +64,7 @@ export default function ReturnActions({
       );
     }
 
-    if (
-      body?.loanId !== loanId ||
-      typeof body.returnedAt !== "string" ||
-      !["available", "reserved", "inspection_required"].includes(
-        body.status,
-      ) ||
-      typeof body.isLate !== "boolean"
-    ) {
+    if (!isReturnOutcome(body) || body.loanId !== loanId) {
       setBlocked(true);
 
       throw new Error(
@@ -78,7 +72,7 @@ export default function ReturnActions({
       );
     }
 
-    setResult(body as ReturnOutcome);
+    setResult(body);
   }
 
   if (result) {

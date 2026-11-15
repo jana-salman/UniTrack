@@ -7,7 +7,7 @@ import { createEquipment } from "@/lib/equipment-queries";
 
 // Prevent tests from accessing the real database.
 vi.mock("@/lib/db", () => ({
-  pool: {},
+  getDatabasePool: () => ({}),
 }));
 
 // Mock authentication.

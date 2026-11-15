@@ -1,6 +1,10 @@
 import "server-only";
 import { signInternalToken } from "@unitrack/internal-auth";
-import type { UserIdentity } from "@unitrack/contracts";
+import {
+  isEquipmentItemSnapshot,
+  isEquipmentStatusChangeResult,
+  type UserIdentity,
+} from "@unitrack/contracts";
 import type { ReturnEquipmentPort, ReturnEquipmentItem } from "./returns/equipment-port";
 import { LoansError, LoansConfigurationError, uncertain } from "./errors";
 export const EQUIPMENT_TIMEOUT_MS = 3000;
@@ -24,12 +28,13 @@ export function equipmentHttp(identity: UserIdentity): ReturnEquipmentPort {
         headers: { Authorization: "Bearer " + token, "X-Request-Id": identity.rid, ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(key ? { "Idempotency-Key": key } : {}) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
-      // The timeout includes the body. Never expose upstream text/headers/errors.
-      const data = await response.json();
       if (!response.ok) {
         if (response.status >= 400 && response.status < 500) throw new LoansError(response.status === 404 ? 404 : 409, "equipment_rejected", "Equipment rejected the return operation. Verify its status before retrying.");
         throw uncertain();
       }
+      if (!response.headers.get("content-type")?.includes("application/json")) throw uncertain();
+      // The timeout includes parsing the body. Never expose upstream text/headers/errors.
+      const data: unknown = await response.json();
       return data;
     } catch (error) {
       if (error instanceof LoansError) throw error;
@@ -39,17 +44,16 @@ export function equipmentHttp(identity: UserIdentity): ReturnEquipmentPort {
   return {
     async getItem(id, labId) {
       try {
-        const data = await call("/items/" + encodeURIComponent(id)) as Record<string, unknown>;
-        const statuses = ["available", "reserved", "checked_out", "inspection_required", "under_maintenance", "retired", "lost", "overdue"];
-        if (data.id !== id || data.lab_id !== labId || typeof data.status !== "string" || !statuses.includes(data.status)) throw uncertain();
+        const data = await call("/items/" + encodeURIComponent(id));
+        if (!isEquipmentItemSnapshot(data) || data.id !== id || data.lab_id !== labId) throw uncertain();
         // Names are aggregated in web, never needed by the Saga.
         return { id, name: "", labId, status: data.status } as ReturnEquipmentItem;
       } catch (error) { if (error instanceof LoansError && error.status === 404) return null; throw error; }
     },
     async changeStatus(input) {
       if (input.labId !== identity.lab_id || input.changedBy !== identity.sub) throw new LoansError(403, "forbidden", "Permission denied.");
-      const data = await call("/items/" + encodeURIComponent(input.itemId) + "/status", { status: input.status, expectedStatus: input.expectedStatus, reason: input.reason, trackOperation: true, ...(input.expectedOperationKey === undefined ? {} : { expectedOperationKey: input.expectedOperationKey }) }, input.idempotencyKey) as Record<string, unknown>;
-      if (data.itemId !== input.itemId || data.status !== input.status || typeof data.changed !== "boolean") throw uncertain();
+      const data = await call("/items/" + encodeURIComponent(input.itemId) + "/status", { status: input.status, expectedStatus: input.expectedStatus, reason: input.reason, trackOperation: true, ...(input.expectedOperationKey === undefined ? {} : { expectedOperationKey: input.expectedOperationKey }) }, input.idempotencyKey);
+      if (!isEquipmentStatusChangeResult(data) || data.itemId !== input.itemId || data.status !== input.status) throw uncertain();
       return { changed: data.changed };
     },
     async getComponents() { throw new Error("Components are aggregated by the gateway."); },

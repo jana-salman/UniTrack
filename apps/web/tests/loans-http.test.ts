@@ -24,7 +24,7 @@ let status: string;
 let owner: string | null;
 let receipts: Record<string, unknown>[];
 let snapshot: { status: string; owner: string | null; receipts: Record<string, unknown>[] };
-let loseEquipmentResponse: boolean, failEquipment: boolean, undoConflict: boolean, loseUndoResponse: boolean, failDue: boolean, stallEquipmentBody: boolean, missingOwnerSchema: boolean;
+let loseEquipmentResponse: boolean, failEquipment: boolean, undoConflict: boolean, loseUndoResponse: boolean, failDue: boolean, stallEquipmentBody: boolean, missingOwnerSchema: boolean, malformedReturnDetails: boolean, malformedReturnOutcome: boolean;
 const observed: { service: string; identity: UserIdentity; rid: string | null; key: string | null }[] = [];
 const servers: Server[] = [];
 let loansUrl: string, equipmentUrl: string, usersUrl: string;
@@ -38,6 +38,8 @@ async function serve(dispatch: (req: Request) => Promise<Response>, name: string
       try { observed.push({ service: name, identity: await verifyInternalToken(token, secret) as UserIdentity, rid: headers.get("X-Request-Id"), key: headers.get("Idempotency-Key") }); } catch { /* Production handler must reject it. */ }
       if (name === "equipment" && failEquipment) { outgoing.writeHead(503, { "Content-Type": "application/json" }); outgoing.end(JSON.stringify({ error: secret + " raw upstream detail" })); return; }
       if (name === "loans" && failDue && req.url.includes("due-dates")) { outgoing.writeHead(503, { "Content-Type": "application/json" }); outgoing.end('{"error":"Unavailable"}'); return; }
+      if (name === "loans" && malformedReturnDetails && incoming.method === "GET" && req.url.includes("/returns/")) { outgoing.writeHead(200, { "Content-Type": "application/json" }); outgoing.end('{"loan":{},"pickupConditions":[]}'); return; }
+      if (name === "loans" && malformedReturnOutcome && incoming.method === "POST" && req.url.includes("/returns/")) { outgoing.writeHead(200, { "Content-Type": "application/json" }); outgoing.end('{"loanId":"wrong"}'); return; }
       if (name === "equipment" && undoConflict && headers.get("Idempotency-Key")?.endsWith(":undo")) { status = "under_maintenance"; }
       const response = await dispatch(req);
       if (name === "equipment" && incoming.method === "PATCH" && stallEquipmentBody) {
@@ -71,6 +73,8 @@ beforeEach(() => {
   loseEquipmentResponse = false; loseUndoResponse = false; failEquipment = false; undoConflict = false; failDue = false;
   stallEquipmentBody = false;
   missingOwnerSchema = false;
+  malformedReturnDetails = false;
+  malformedReturnOutcome = false;
   vi.stubEnv("INTERNAL_JWT_SECRET", secret); vi.stubEnv("LOANS_SERVICE_URL", loansUrl); vi.stubEnv("EQUIPMENT_SERVICE_URL", equipmentUrl); vi.stubEnv("USERS_SERVICE_URL", usersUrl);
   mocks.profile.mockReset().mockResolvedValue(profile);
   mocks.usersQuery.mockReset().mockImplementation(async (sql: string) => ({ rows: sql.includes("ANY(") ? [{ id: borrowerId, full_name: "Same-lab borrower" }] : [profile] }));
@@ -198,6 +202,22 @@ it("rejects invalid conditions and reports missing configuration/schema without 
   vi.stubEnv("INTERNAL_JWT_SECRET", secret);
   mocks.loans = { query: async () => { throw Object.assign(new Error(secret + " private schema text"), { code: "42703" }); } };
   const schema = await GET(browser("GET"), context()); expect(schema.status).toBe(503); const data = await schema.text(); expect(data).toContain("configuration or schema"); expect(data).not.toContain(secret); expect(data).not.toContain("private schema");
+});
+it("rejects a malformed successful Loans details payload before aggregation", async () => {
+  malformedReturnDetails = true;
+  const response = await GET(browser("GET"), context());
+  expect(response.status).toBe(502);
+  expect(await response.json()).toEqual({ error: "Invalid service response.", code: "service_response" });
+  expect(mocks.usersQuery).not.toHaveBeenCalled();
+  expect(mocks.equipmentQuery).not.toHaveBeenCalled();
+});
+it("rejects a malformed successful Loans return outcome before forwarding it", async () => {
+  malformedReturnOutcome = true;
+  const response = await POST(browser(), context());
+  expect(response.status).toBe(502);
+  expect(await response.json()).toEqual({ error: "Invalid service response.", code: "service_response" });
+  expect(db.state.records).toHaveLength(0);
+  expect(mocks.equipmentQuery).not.toHaveBeenCalled();
 });
 it("restores catalogue dates and preserves items with an explicit partial indication on Loans failure", async () => {
   const request = () => new Request("http://web.test/api/items");

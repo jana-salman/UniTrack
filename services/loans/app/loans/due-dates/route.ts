@@ -1,4 +1,4 @@
-import { PROFILE_ROLES, isProfileId } from "@unitrack/contracts";
+import { PROFILE_ROLES, isProfileId, type LoanDueDate } from "@unitrack/contracts";
 import { requireUser } from "../../../lib/authorization";
 import { LoansError, loansFailure } from "../../../lib/errors";
 import { getDatabasePool } from "../../../lib/db";
@@ -11,6 +11,7 @@ export async function GET(request: Request) {
     if (!ids.length) return Response.json([]);
     const result = await getDatabasePool().query<{ item_id: string; due_date: Date }>("select item_id, due_date from public.loans where lab_id = $1 and item_id = any($2::uuid[]) and returned_at is null", [actor.lab_id, [...new Set(ids)]]);
     // Explicit projection: never include loan/profile/reservation identifiers.
-    return Response.json(result.rows.map(row => ({ itemId: row.item_id, dueDate: row.due_date.toISOString() })), { headers: { "Cache-Control": "private, no-store" } });
+    const dueDates: LoanDueDate[] = result.rows.map(row => ({ itemId: row.item_id, dueDate: row.due_date.toISOString() }));
+    return Response.json(dueDates, { headers: { "Cache-Control": "private, no-store", "X-Request-Id": actor.rid } });
   } catch (error) { return loansFailure(error); }
 }

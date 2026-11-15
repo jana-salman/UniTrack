@@ -12,6 +12,11 @@ export function isUserProfile(value: unknown): value is UserProfile {
   return isProfileId(p.id) && typeof p.full_name === "string" && typeof p.university_email === "string" &&
     isProfileRole(p.role) && typeof p.lab_id === "number" && Number.isSafeInteger(p.lab_id) && p.lab_id > 0 && typeof p.is_active === "boolean";
 }
+export function isProfileName(value: unknown): value is ProfileName {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const profile = value as Record<string, unknown>;
+  return isProfileId(profile.id) && typeof profile.full_name === "string";
+}
 export const USERS_ERROR_CONTRACT = {
   messages: ["Sign in is required.", "You do not have permission to perform this action.", "Invalid user id.",
     "role must be a supported profile role.", "User was not found in your laboratory.", "Unable to update the role.",

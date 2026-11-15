@@ -1,4 +1,4 @@
-import { isProfileId } from "@unitrack/contracts";
+import { isProfileId, type ReturnDetails } from "@unitrack/contracts";
 import { requireUser } from "../../../lib/authorization";
 import { LoansError, loansFailure } from "../../../lib/errors";
 import { getReturnDetails } from "../../../lib/returns/queries";
@@ -13,7 +13,16 @@ export async function GET(request: Request, context: Context) {
     if (!isProfileId(loanId)) throw new LoansError(400, "invalid_loan", "Invalid loan ID.");
     const details = await getReturnDetails(loanId, actor.lab_id);
     if (!details) throw new LoansError(404, "loan_not_found", "Loan not found.");
-    return Response.json(details, { headers: { "Cache-Control": "private, no-store" } });
+    const response: ReturnDetails = {
+      loan: {
+        ...details.loan,
+        borrowed_at: details.loan.borrowed_at.toISOString(),
+        due_date: details.loan.due_date.toISOString(),
+        returned_at: details.loan.returned_at?.toISOString() ?? null,
+      },
+      pickupConditions: details.pickupConditions,
+    };
+    return Response.json(response, { headers: { "Cache-Control": "private, no-store", "X-Request-Id": actor.rid } });
   } catch (error) { return loansFailure(error); }
 }
 export async function POST(request: Request, context: Context) {
@@ -28,6 +37,6 @@ export async function POST(request: Request, context: Context) {
       if (input.conditions.length > 101 || input.conditions.some(row => (row.kitComponentId !== null && !isProfileId(row.kitComponentId)) || (row.notes?.length ?? 0) > 5000)) throw 0;
       body = input;
     } catch { throw new LoansError(400, "invalid_return", "Invalid return information. Check every condition."); }
-    return Response.json(await confirmReturn(loanId, body, actor, equipmentHttp(actor)), { headers: { "Cache-Control": "private, no-store" } });
+    return Response.json(await confirmReturn(loanId, body, actor, equipmentHttp(actor)), { headers: { "Cache-Control": "private, no-store", "X-Request-Id": actor.rid } });
   } catch (error) { return loansFailure(error); }
 }

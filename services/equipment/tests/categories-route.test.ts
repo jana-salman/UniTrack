@@ -7,7 +7,7 @@ import { createCategory } from "@/lib/category-queries";
 
 // Mock the database so tests never modify PostgreSQL.
 vi.mock("@/lib/db", () => ({
-  pool: {},
+  getDatabasePool: () => ({}),
 }));
 
 // Mock authentication.

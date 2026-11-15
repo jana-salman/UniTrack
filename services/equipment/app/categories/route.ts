@@ -1,6 +1,6 @@
 import { equipmentFailure } from "../../lib/service-errors";
 import { NextResponse } from "next/server";
-import { pool } from "../../lib/db";
+import { getDatabasePool } from "../../lib/db";
 
 import {
   getActiveCategories,
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   try {
     await requireRole(request, ["student", "lab_assistant", "professor", "lab_manager"]);
 
-    const categories = await getActiveCategories(pool);
+    const categories = await getActiveCategories(getDatabasePool());
 
     return NextResponse.json(categories);
   } catch (error) {
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     const categoryInput = body as CreateCategoryInput;
 
     // Step 4: Insert the category into PostgreSQL.
-    const category = await createCategory(pool, categoryInput);
+    const category = await createCategory(getDatabasePool(), categoryInput);
 
     if (!category) {
       throw new Error("Category creation returned no record.");

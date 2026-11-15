@@ -1,6 +1,11 @@
 import "server-only";
 import { AuthorizationError } from "@/lib/auth/errors";
-import { EQUIPMENT_ERROR_CONTRACT, isProfileId } from "@unitrack/contracts";
+import {
+  EQUIPMENT_ERROR_CONTRACT,
+  isCatalogueItem,
+  isLoanDueDate,
+  type CatalogueItem,
+} from "@unitrack/contracts";
 import { createServiceCaller } from "./call-service";
 import { callLoans, trustedIdentity } from "./loans";
 
@@ -9,7 +14,14 @@ export async function catalogue(request: Request): Promise<Response> {
     const identity = await trustedIdentity(request);
     const response = await createServiceCaller({ baseUrl: process.env.EQUIPMENT_SERVICE_URL ?? "", secret: process.env.INTERNAL_JWT_SECRET ?? "", errorContract: EQUIPMENT_ERROR_CONTRACT })("/items" + new URL(request.url).search, identity);
     if (!response.ok) return response;
-    const items: { id: string; expectedReturn: string | null }[] = await response.json();
+    const itemPayload: unknown = await response.json();
+    if (!Array.isArray(itemPayload) || !itemPayload.every(isCatalogueItem)) {
+      return Response.json(
+        { error: "Invalid service response.", code: "service_response" },
+        { status: 502, headers: { "X-Request-Id": identity.rid } },
+      );
+    }
+    const items: CatalogueItem[] = itemPayload;
     let partial = false;
     const dates = new Map<string, string>();
     // Bounded requests support catalogues larger than the due-date batch limit.
@@ -19,7 +31,7 @@ export async function catalogue(request: Request): Promise<Response> {
         const due = await callLoans("/loans/due-dates?itemIds=" + encodeURIComponent(ids.join(",")), identity);
         if (!due.ok) throw 0;
         const rows: unknown = await due.json();
-        if (!Array.isArray(rows) || rows.some(row => !row || !isProfileId(row.itemId) || !ids.includes(row.itemId) || typeof row.dueDate !== "string" || !Number.isFinite(Date.parse(row.dueDate)))) throw 0;
+        if (!Array.isArray(rows) || rows.some(row => !isLoanDueDate(row) || !ids.includes(row.itemId))) throw 0;
         for (const row of rows) dates.set(row.itemId, row.dueDate);
       } catch { partial = true; }
     }

@@ -6,7 +6,7 @@ import type { FormEvent } from "react";
 import type {
   ConfirmReturnInput,
   PickupCondition,
-} from "@/lib/returns/types";
+} from "@unitrack/contracts";
 
 interface ReturnFormProps {
   pickupConditions: PickupCondition[];

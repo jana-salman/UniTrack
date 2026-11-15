@@ -2,26 +2,15 @@
 
 import { useEffect, useState } from "react";
 import ReturnActions from "./return-actions";
-import type {
-  ConditionStatus,
-  PickupCondition,
-  ReturnLoan,
-} from "@/lib/returns/types";
+import {
+  isReturnDetails,
+  type ConditionStatus,
+  type ReturnDetails,
+} from "@unitrack/contracts";
 
-type LoanResponse = Omit<
-  ReturnLoan,
-  "borrowed_at" | "due_date" | "returned_at"
-> & {
-  borrowed_at: string;
-  due_date: string;
-  returned_at: string | null;
-};
-
-interface ReturnDetailsResponse {
+interface ReturnDetailsResponse extends ReturnDetails {
   borrower?: { name: string | null };
   partialData?: boolean;
-  loan: LoanResponse;
-  pickupConditions: PickupCondition[];
   equipment: {
     name: string;
     components: {
@@ -29,6 +18,27 @@ interface ReturnDetailsResponse {
       name: string;
     }[];
   };
+}
+
+function isReturnDetailsResponse(value: unknown): value is ReturnDetailsResponse {
+  if (!isReturnDetails(value)) return false;
+  const response = value as ReturnDetails & Record<string, unknown>;
+  const equipment = response.equipment;
+  if (!equipment || typeof equipment !== "object" || Array.isArray(equipment)) return false;
+  const equipmentRecord = equipment as Record<string, unknown>;
+  if (typeof equipmentRecord.name !== "string" || !Array.isArray(equipmentRecord.components)) return false;
+  if (!equipmentRecord.components.every(component => {
+    if (!component || typeof component !== "object" || Array.isArray(component)) return false;
+    const row = component as Record<string, unknown>;
+    return typeof row.id === "string" && typeof row.name === "string";
+  })) return false;
+  const borrower = response.borrower;
+  if (borrower !== undefined) {
+    if (!borrower || typeof borrower !== "object" || Array.isArray(borrower)) return false;
+    const name = (borrower as Record<string, unknown>).name;
+    if (name !== null && typeof name !== "string") return false;
+  }
+  return response.partialData === undefined || typeof response.partialData === "boolean";
 }
 
 type LoadState =
@@ -79,8 +89,10 @@ export default function ReturnDetails({
           );
         }
 
-        const data =
-          (await response.json()) as ReturnDetailsResponse;
+        const data: unknown = await response.json();
+        if (!isReturnDetailsResponse(data)) {
+          throw new Error("The return details response is invalid.");
+        }
 
         if (!controller.signal.aborted) {
           setState({ status: "ready", data });

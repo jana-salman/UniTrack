@@ -16,6 +16,7 @@ const id = "550e8400-e29b-41d4-a716-446655440000";
 const profile = { id: "550e8400-e29b-41d4-a716-446655440001", role: "lab_manager", lab_id: 7, is_active: true };
 let calls = 0;
 let status = "available";
+let malformedCatalogue = false;
 let receipts: Record<string, unknown>[] = [];
 let snapshot: { status: string; receipts: Record<string, unknown>[] };
 const paths: string[] = [];
@@ -39,7 +40,7 @@ beforeAll(async () => {
 });
 afterAll(async () => { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
 beforeEach(() => {
- calls = 0; paths.length = 0; status = "available"; receipts = [];
+ calls = 0; paths.length = 0; status = "available"; receipts = []; malformedCatalogue = false;
  mocks.profile.mockReset().mockResolvedValue(profile); mocks.release.mockClear();
  const address = server.address(); if (!address || typeof address === "string") throw new Error("Fixture server unavailable");
  vi.stubEnv("EQUIPMENT_SERVICE_URL", "http://127.0.0.1:" + address.port); vi.stubEnv("INTERNAL_JWT_SECRET", secret);
@@ -47,7 +48,7 @@ beforeEach(() => {
   if (sql === "BEGIN") snapshot = { status, receipts: structuredClone(receipts) };
   if (sql === "ROLLBACK") { status = snapshot.status; receipts = snapshot.receipts; }
   if (sql.includes("pg_advisory")) return { rows: [] };
-  if (sql.includes('AS "assetCode"')) return { rows: [{ id, assetCode: "EQ-1", name: "Camera", category: "Cameras", status: "checked_out", expectedReturn: "old-value" }] };
+  if (sql.includes('AS "assetCode"')) return { rows: [{ id: malformedCatalogue ? "invalid-id" : id, assetCode: "EQ-1", name: "Camera", category: "Cameras", status: "checked_out", expectedReturn: "old-value" }] };
   if (sql.includes("FOR UPDATE")) return { rows: values[1] === 7 ? [{ id, lab_id: 7, status }] : [] };
   if (sql.includes("FROM public.equipment_status_history")) return { rows: receipts.filter(r => r.request_key === values[0]) };
   if (sql.startsWith("UPDATE")) status = String(values[0]);
@@ -95,6 +96,12 @@ describe("web gateway to real Equipment HTTP handlers with isolated DB", () => {
   mocks.query.mockRejectedValue(Object.assign(new Error(secret + " private SQL"), { code: "42703" }));
   const response = await GET(browser()); expect(response.status).toBe(503);
   expect(await response.json()).toEqual({ error: "Equipment database schema is not ready.", code: "equipment_schema_not_ready" });
+ });
+ it("rejects a malformed successful Equipment payload", async () => {
+  malformedCatalogue = true;
+  const response = await GET(browser());
+  expect(response.status).toBe(502);
+  expect(await response.json()).toEqual({ error: "Invalid service response.", code: "service_response" });
  });
  it("rejects an unverified browser before making a service call", async () => {
   mocks.profile.mockRejectedValue(new AuthorizationError(401, "unauthenticated", "Sign in is required."));
