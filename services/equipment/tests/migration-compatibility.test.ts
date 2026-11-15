@@ -40,3 +40,16 @@ it("keeps the 003-005 preflight read-only and checks the required gates", () => 
  expect(sql).toContain("public_has_no_table_write_grants");
  expect(sql).toContain("'00_OVERALL_' || gate || '_GATE'");
 });
+
+it("keeps service isolation password-free and scoped to explicit UniTrack objects", () => {
+ const sql = readFileSync(new URL("006_service_database_isolation.sql", migrations), "utf8");
+ const executable = sql.replace(/--[^\n]*/g, "");
+
+ expect(executable).toMatch(/CREATE ROLE %I NOLOGIN[\s\S]*NOBYPASSRLS/i);
+ expect(executable).not.toMatch(/\bPASSWORD\b|ALL TABLES IN SCHEMA|ALL SEQUENCES IN SCHEMA/i);
+ expect(executable).toContain("public.equipment_status_history");
+ expect(executable).toContain("public.equipment_status_history_id_seq");
+ expect(executable).toMatch(/GRANT SELECT ON public\.labs TO unitrack_users_service/i);
+ expect(executable).toMatch(/GRANT SELECT, UPDATE ON public\.loans TO unitrack_loans_service/i);
+ expect(executable).toMatch(/GRANT SELECT, INSERT ON public\.equipment_status_history TO unitrack_equipment_service/i);
+});

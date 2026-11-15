@@ -1,5 +1,9 @@
--- Minimal local compatibility for the only Supabase-owned object referenced by
--- database/schema.sql. This is not an Auth emulator and contains no real user data.
+-- Minimal local compatibility for Supabase-owned objects and browser roles
+-- referenced by the schema/isolation migrations. This is not an Auth emulator
+-- and contains no real user data.
+
+CREATE ROLE anon NOLOGIN;
+CREATE ROLE authenticated NOLOGIN;
 
 CREATE SCHEMA auth;
 

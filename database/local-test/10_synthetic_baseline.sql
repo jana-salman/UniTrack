@@ -2,6 +2,11 @@
 -- Supabase or a developer environment.
 BEGIN;
 
+-- Disposable privileges prove migration 006 takes direct table/sequence access
+-- away from Supabase's browser-facing roles. They never leave this container.
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+
 INSERT INTO auth.users (id) VALUES
   ('00000000-0000-4000-8000-000000000001'),
   ('00000000-0000-4000-8000-000000000002');

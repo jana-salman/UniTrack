@@ -98,6 +98,7 @@ query had yet occurred remain historical evidence for that earlier task.
 | 2 | 003_equipment_request_fingerprint.sql | Target column verified absent; remains unapplied | Owner reviews/applies after request_key readiness |
 | 3 | 004_loans_return_operation.sql | Target column verified absent; remains unapplied | Owner reviews/applies after Equipment key/fingerprint readiness; adds nullable Loans plan JSONB, no audit rewrite |
 | 4 | 005_equipment_operation_guard.sql | Target column verified absent; remains unapplied | After prior readiness, install nullable item ownership and item-status/history-insert triggers before enabling returns. Existing history is untouched. |
+| 5 | 006_service_database_isolation.sql | Proposed and locally verified; remains unapplied | Review separately after 005 and after the real grant/policy inventories. Provision private login-role membership outside source control; do not apply automatically with 003-005. |
 
 The request-key file is an exact selective copy from preserved return branch 3f220aa. It adds a nullable request_key if absent and a unique partial index on non-null keys. Existing null keys are compatible. Existing non-null duplicates would prevent unique-index creation; any remediation requires a separately authorized owner decision, not deleting immutable audit history.
 
@@ -216,3 +217,66 @@ The focused-review task records a local commit after final verification. Users i
 - Migrations 003/004 remain additive and nullable for existing rows, without backfilling immutable history or altering existing request_key data. Order is existing expanded schema/triggers, original request_key readiness, 003, 004, then new 005 before reviewed returns. None was executed. Validate types, indexes, triggers, grants and connection mode separately. Loans requires a direct/session-pooled connection and LOANS_DATABASE_SESSION_AFFINITY acknowledgement; a transaction-mode pooler can invalidate session locking.
 - Final focused-review verification passed all root commands: typegen, **466 tests / 39 files** (web 127, auth 63, Equipment 151, Loans 75, Users 50), lint without warnings, typecheck and builds. This adds 19 regression tests to the pre-review 447. HTTP tests use real local transport/handlers with isolated profile/database dependencies; concurrency/commit/trigger models and static SQL inspection are not real PostgreSQL proof. Extraction-stage process startup/shutdown evidence remains recorded above and was not repeated for unchanged process scripts in this review.
 - Remaining limits: no background recovery/operator UI, no distributed serializable transaction, possible inter-service change between current-state read and Loans commit, pending live Supabase/PostgreSQL/migration/trigger/pooler verification, and unbuilt reservation/handover/inspection-resolution/notification features. No production settings or private files were changed.
+
+## Final microservices integration update
+
+This section supersedes older “pending local PostgreSQL/HTTP” statements above;
+those paragraphs remain as historical evidence for their original checkpoints.
+
+### Implemented architecture
+
+- Web owns Supabase browser authentication, university-domain enforcement, UI,
+  and browser-facing gateway routes. It has no PostgreSQL dependency.
+- Users owns profile, role, and lab reads/updates. Equipment owns catalogue,
+  item, kit/component, and immutable status history operations. Loans owns due
+  dates, return state, condition records, and return recovery; it calls
+  Equipment over signed HTTP.
+- Shared contracts and the 60-second internal JWT carry signed user/service
+  identity and a validated request ID. Gateway and service authorization remain
+  enforced at each boundary.
+- Migrations 003-005, their indexes/triggers, replay/ownership behavior, and the
+  return Saga pass disposable PostgreSQL testing. Proposed migration 006 adds
+  password-free group roles, least-privilege grants, and operation-specific RLS
+  policies; positive owned-table and negative cross-owner checks pass locally.
+
+### Local HTTP evidence
+
+All four real Next.js 16.4.4 development processes ran on ports 3000-3003 with
+the synthetic PostgreSQL database. Public health, Users service bootstrap,
+Users role denial, Equipment catalogue, invalid internal signature rejection,
+Loans due dates, return details, Loans-to-Equipment status change, completed
+return, exact replay, and final Equipment state passed over localhost HTTP. The
+Web gateway rejected an unauthenticated browser request with 401 as designed.
+The root redirect produced an instant-navigation validation warning; the root
+segment now explicitly opts out because it contains only a redirect.
+
+This did not emulate Supabase Auth. Existing Web HTTP suites exercise gateway
+forwarding with mocked session/profile bootstrap; the real local process check
+proves only the unauthenticated Web boundary. A real signed-in Web-to-Users/
+Equipment/Loans browser flow remains a hosted-environment check.
+
+### Deployment handoff
+
+The exact four-project Vercel roots, build/install commands, environment matrix,
+and catalogue-domain explanation are in `README.md`. Deploy all four projects
+from the same reviewed commit. `unitrack-equipment` is an authenticated API,
+not the catalogue UI; users browse `unitrack-app/catalogue`. Redirecting an
+unauthenticated visitor to login is correct. The current two-project setup is
+incomplete because Users and Loans are not separately deployed, and Web is on
+an older branch than Equipment.
+
+The local `feature/verify-auth-users` branch described by the owner was not
+present in local branches, remote-tracking refs, worktrees, or reflog entries.
+Its request logging, read-only checks, and Loans consistency report were not
+recreated or overwritten. Request IDs are already propagated; integrating that
+teammate commit remains separate when it is made available.
+
+### Architecture blockers versus product backlog
+
+Architecture blockers are limited to owner-approved shared-database migrations,
+review/provisioning of service login roles, four aligned deployments and private
+configuration, direct/session Loans connectivity, and a real hosted Supabase-
+authenticated smoke test. Reservation creation/overlap/cancellation, pickup/
+handover, inspection resolution, notifications, background recovery/operator
+UI, and other Sprint features are product backlog and do not invalidate the
+extracted service boundaries implemented here.

@@ -53,6 +53,10 @@ try {
   Invoke-PsqlFile '/workspace/database/migrations/005_equipment_operation_guard.sql' 'Migration 005'
   Invoke-PsqlFile '/workspace/database/local-test/verify_005.sql' 'Migration 005 verification'
 
+  Write-Host 'Applying and verifying migration 006 service isolation locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/006_service_database_isolation.sql' 'Migration 006'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_006.sql' 'Migration 006 verification'
+
   Push-Location $repositoryRoot
   try {
     Write-Host 'Running the existing static migration compatibility test...'
@@ -79,7 +83,7 @@ try {
     Pop-Location
   }
 
-  Write-Host 'PASS: migrations 003-005 and the focused microservice integration checks passed locally.'
+  Write-Host 'PASS: migrations 003-006 and the focused microservice integration checks passed locally.'
 }
 finally {
   if ($containerStarted) {

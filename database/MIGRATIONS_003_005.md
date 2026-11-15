@@ -106,6 +106,24 @@ Supabase Auth and connection-mode checks. See
     application results and sanitized logs. Production/shared-database approval
     is a separate decision; this runbook does not grant it.
 
+## Service isolation after 005
+
+`database/migrations/006_service_database_isolation.sql` is a separate,
+password-free isolation migration. It creates three non-login, non-bypass group
+roles, grants only current service operations, removes PUBLIC and (when present)
+Supabase `anon`/`authenticated` table and sequence grants, and adds explicit RLS
+policies. It passed the disposable local role/grant/RLS checks in
+`database/local-test/verify_006.sql`.
+
+Do not apply 006 automatically with 003-005. Before approval, review the real
+`GRANT_INVENTORY` and `POLICY_INVENTORY`, identify any existing PostgREST use,
+and provision three private login roles as members of the matching group roles.
+Each service receives only its own login URL. Web receives none. Confirm the
+login roles are not owners, superusers, or `BYPASSRLS`, then run positive owned-
+table and negative cross-owner checks. Loans still requires a direct or
+session-pooled connection. Passwords and membership commands do not belong in
+source control.
+
 ## Stop conditions
 
 Stop and request an owner decision if an expected object has the wrong type or
