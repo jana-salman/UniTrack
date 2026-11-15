@@ -55,6 +55,14 @@ than editing history, dropping objects or relying on `IF NOT EXISTS`.
 Use an isolated staging database cloned from representative data. Do not use
 the real production/shared database for the first execution or behavior tests.
 
+For this project, which has no separate hosted staging database, first run the
+disposable Docker harness in `database/local-test/`. It reuses this preflight,
+the baseline schema/triggers, and the existing migration files with synthetic
+data. A local PASS provides PostgreSQL migration/trigger/application evidence;
+it does not replace the real database preflight, backup, grants/RLS review, or
+Supabase Auth and connection-mode checks. See
+`database/local-test/README.md` for the exact command and limitations.
+
 1. **Capture the baseline.** Run the read-only preflight, save all outputs, and
    record row counts for `equipment_items`, `equipment_status_history`, `loans`
    and `condition_records`. Record the count of existing keyed history rows.
