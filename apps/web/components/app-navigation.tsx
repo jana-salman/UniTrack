@@ -7,10 +7,15 @@ import { roleLabel, type Profile } from "@/lib/auth/model";
 export function AppNavigation({ profile }: { profile: Profile }) {
   const canScan = profile.role !== "student";
   const isManager = profile.role === "lab_manager";
+  const canLookupEquipment =
+    profile.role === "lab_assistant" || isManager;
 
   const navigation: NavLink[] = [
     { href: "/dashboard", label: "Dashboard" },
     { href: "/catalogue", label: "Catalogue" },
+    ...(canLookupEquipment
+  ? [{ href: "/equipment/lookup", label: "Find Equipment" }]
+  : []),
     ...(canScan ? [{ href: "/scan", label: "Scan" }] : []),
     ...(isManager
       ? [
