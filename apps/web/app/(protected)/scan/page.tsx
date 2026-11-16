@@ -3,7 +3,7 @@ import { requirePageProfile } from "@/lib/auth/authorization";
 import ScanResult from "./scan-result";
 
 export default async function ScanPage() {
-  await requirePageProfile([
+  const profile = await requirePageProfile([
     "lab_manager",
     "lab_assistant",
     "professor",
@@ -26,7 +26,7 @@ export default async function ScanPage() {
         </p>
       </section>
 
-      <ScanResult />
+      <ScanResult canViewReservations={profile.role === "lab_assistant"} />
     </main>
   );
 }
