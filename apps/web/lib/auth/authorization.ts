@@ -38,7 +38,14 @@ export const getAuthenticatedProfile = cache(async (): Promise<Profile> => {
 
   let profile: Profile | null;
   try { profile = await findProfileById(data.user.id); }
-  catch { throw new AuthorizationError(503, "users_unavailable", "User profiles are temporarily unavailable."); }
+  catch (error) {
+    throw new AuthorizationError(
+      503,
+      "users_unavailable",
+      "User profiles are temporarily unavailable.",
+      { cause: error },
+    );
+  }
   if (!profile || normalizeEmail(profile.university_email) !== email) {
     throw new AuthorizationError(
       403,
