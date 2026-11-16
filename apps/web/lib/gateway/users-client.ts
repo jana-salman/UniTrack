@@ -2,7 +2,10 @@ import "server-only";
 import { createServiceCaller } from "./call-service";
 import { USERS_ERROR_CONTRACT, type InternalIdentity } from "@unitrack/contracts";
 export class UsersServiceUnavailableError extends Error {
- constructor() { super("User profiles are temporarily unavailable."); this.name = "UsersServiceUnavailableError"; }
+ constructor(options?: ErrorOptions) {
+  super("User profiles are temporarily unavailable.", options);
+  this.name = "UsersServiceUnavailableError";
+ }
 }
 // Transport only: deliberately no authorization/profile/session imports (bootstrap must not recurse).
 export async function callUsers(path: string, identity: InternalIdentity, options: { method?: "GET" | "PATCH"; body?: unknown } = {}) {
