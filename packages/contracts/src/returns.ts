@@ -47,6 +47,54 @@ export interface ReturnLoanWire {
 export interface ReturnDetails {
   loan: ReturnLoanWire;
   pickupConditions: PickupCondition[];
+  returnHistory?: ReturnHistory;
+}
+
+export interface RecordedReturnCondition {
+  id: string;
+  kitComponentId: string | null;
+  conditionStatus: ConditionStatus;
+  notes: string | null;
+  recordedAt: string;
+}
+export interface ReturnHistory {
+  returnedAt: string;
+  isLate: boolean;
+  conditions: RecordedReturnCondition[];
+}
+export interface ReturnProblemCondition {
+  componentId: string | null;
+  kind: "missing" | "new_damage";
+  notes: string | null;
+}
+export interface OwnReturnProblem {
+  loanId: string;
+  itemId: string;
+  returnedAt: string;
+  problems: ReturnProblemCondition[];
+}
+export interface StudentReturnProblem extends OwnReturnProblem {
+  itemName: string;
+  problems: (ReturnProblemCondition & { label: string })[];
+}
+
+export function isReturnHistory(value: unknown): value is ReturnHistory {
+  return isRecord(value) && isDateString(value.returnedAt) && typeof value.isLate === "boolean"
+    && Array.isArray(value.conditions) && value.conditions.every(row => isRecord(row)
+      && typeof row.id === "string" && UUID_PATTERN.test(row.id)
+      && (row.kitComponentId === null || (typeof row.kitComponentId === "string" && UUID_PATTERN.test(row.kitComponentId)))
+      && isConditionStatus(row.conditionStatus) && (row.notes === null || typeof row.notes === "string") && isDateString(row.recordedAt));
+}
+export function isOwnReturnProblem(value: unknown): value is OwnReturnProblem {
+  return isRecord(value) && typeof value.loanId === "string" && UUID_PATTERN.test(value.loanId)
+    && typeof value.itemId === "string" && UUID_PATTERN.test(value.itemId) && isDateString(value.returnedAt)
+    && Array.isArray(value.problems) && value.problems.length > 0 && value.problems.every(row => isRecord(row)
+      && (row.componentId === null || (typeof row.componentId === "string" && UUID_PATTERN.test(row.componentId)))
+      && typeof row.kind === "string" && ["missing", "new_damage"].includes(row.kind) && (row.notes === null || typeof row.notes === "string"));
+}
+export function isStudentReturnProblem(value: unknown): value is StudentReturnProblem {
+  return isOwnReturnProblem(value) && typeof (value as StudentReturnProblem).itemName === "string"
+    && value.problems.every(row => typeof (row as { label?: unknown }).label === "string");
 }
 
 function isDateString(value: unknown): value is string {
@@ -65,7 +113,9 @@ export function isReturnDetails(value: unknown): value is ReturnDetails {
     && isDateString(loan.borrowed_at)
     && isDateString(loan.due_date)
     && (loan.returned_at === null || isDateString(loan.returned_at));
-  return validLoan && value.pickupConditions.every(condition => {
+  return validLoan && (value.returnHistory === undefined || (isReturnHistory(value.returnHistory)
+    && value.returnHistory.returnedAt === loan.returned_at
+    && value.returnHistory.isLate === (Date.parse(value.returnHistory.returnedAt) > Date.parse(loan.due_date as string)))) && value.pickupConditions.every(condition => {
     if (!isRecord(condition)) return false;
     return typeof condition.id === "string" && UUID_PATTERN.test(condition.id)
       && (condition.kit_component_id === null

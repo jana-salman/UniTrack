@@ -44,7 +44,8 @@ export type {
 export { isUserProfile, isProfileId, isProfileName, USERS_ERROR_CONTRACT } from "./users.js";
 export type { UserProfile, ProfileName } from "./users.js";
 
-export { isConditionStatus, isReturnDetails, isReturnOutcome } from "./returns.js";
+export { isConditionStatus, isReturnDetails, isReturnOutcome, isReturnHistory, isOwnReturnProblem, isStudentReturnProblem } from "./returns.js";
+export type { RecordedReturnCondition, ReturnHistory, ReturnProblemCondition, OwnReturnProblem, StudentReturnProblem } from "./returns.js";
 export type { ConditionStatus, ReturnLoan, ReturnLoanWire, ReturnDetails, PickupCondition, ReturnConditionInput, ConfirmReturnInput, ReturnOutcome } from "./returns.js";
 
 export { isLoanDueDate, LOANS_ERROR_CONTRACT } from "./loans.js";

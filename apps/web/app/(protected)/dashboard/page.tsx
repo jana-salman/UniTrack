@@ -1,6 +1,7 @@
 import { roleLabel } from "@/lib/auth/model";
 import { requirePageProfile } from "@/lib/auth/authorization";
 import { Suspense } from "react";
+import ReturnProblems from "./return-problems";
 
 const roleContent = {
   student: {
@@ -54,6 +55,7 @@ async function DashboardContent()  {
           </p>
         </article>
       </section>
+      {profile.role === "student" && <ReturnProblems key={profile.id + ":" + profile.lab_id} />}
     </main>
   );
 }

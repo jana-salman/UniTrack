@@ -15,7 +15,7 @@ export function returnDatabase() {
   const sql: { text: string; values: unknown[] }[] = [];
   const settings = { historyFailure: false, activePickup: false, commitFailure: "" as "" | "before" | "after", compensationCommitFailure: "" as "" | "before" | "after", planCommitFailure: "" as "" | "before" | "after", dropPlanWrite: false, rollbackFailure: false, legacyReturnAfterRollback: false };
   const pool = {
-    async query(text: string, values: unknown[] = []) { return answer(text, values); },
+    async query(text: string, values: unknown[] = []) { sql.push({ text, values }); return answer(text, values); },
     async connect() {
       let snapshot: typeof state | undefined;
       let ownsLock = false;
@@ -49,6 +49,13 @@ export function returnDatabase() {
     },
   };
   async function answer(text: string, values: unknown[]) {
+    const returnedConditions = () => state.records.map((v, index) => ({ id: "550e8400-e29b-41d4-a716-" + String(index + 100).padStart(12, "0"), loan_id: loanId, item_id: itemId, kit_component_id: v[2], phase: "return", condition_status: v[4], notes: v[5], recorded_at: v[7] }));
+    if (text.includes("from public.loans where borrower_id")) return { rows: state.loan.borrower_id === values[0] && state.loan.lab_id === values[1] && state.loan.returned_at ? [structuredClone(state.loan)] : [] };
+    if (text.includes("from public.condition_records c join")) {
+      if (state.loan.borrower_id !== values[0] || state.loan.lab_id !== values[1] || !state.loan.returned_at) return { rows: [] };
+      return { rows: [...state.pickup.map(row => ({ ...row, loan_id: loanId, item_id: itemId, phase: "pickup", recorded_at: state.loan.borrowed_at })), ...returnedConditions()] };
+    }
+    if (text.includes("from public.condition_records") && text.includes("phase = 'return'")) return { rows: values[0] === loanId && values[1] === itemId && values[2] === state.loan.lab_id ? returnedConditions() : [] };
     if (text.includes("select exists")) return { rows: [{ exists: settings.activePickup }] };
     if (text.startsWith("update public.loans set return_operation")) { if (settings.dropPlanWrite) return { rows: [] }; state.loan.return_operation = JSON.parse(String(values[0])); return { rows: [{ id: loanId }] }; }
     if (text.includes("set returned_at")) { if (state.loan.returned_at) return { rows: [] }; state.loan.returned_at = values[0] as Date; return { rows: [{ id: loanId }] }; }

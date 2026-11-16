@@ -5,6 +5,7 @@ import { getReturnDetails } from "../../../lib/returns/queries";
 import { confirmReturn } from "../../../lib/returns/service";
 import { equipmentHttp } from "../../../lib/equipment-http";
 import { validateReturnInput } from "../../../lib/returns/validation";
+import { getReturnHistory } from "../../../lib/returns/history";
 type Context = { params: Promise<{ loanId: string }> };
 export async function GET(request: Request, context: Context) {
   try {
@@ -15,12 +16,14 @@ export async function GET(request: Request, context: Context) {
     if (!details) throw new LoansError(404, "loan_not_found", "Loan not found.");
     const response: ReturnDetails = {
       loan: {
-        ...details.loan,
+        id: details.loan.id, item_id: details.loan.item_id, borrower_id: details.loan.borrower_id,
+        reservation_id: details.loan.reservation_id, lab_id: details.loan.lab_id,
         borrowed_at: details.loan.borrowed_at.toISOString(),
         due_date: details.loan.due_date.toISOString(),
         returned_at: details.loan.returned_at?.toISOString() ?? null,
       },
       pickupConditions: details.pickupConditions,
+      ...(details.loan.returned_at ? { returnHistory: await getReturnHistory(details.loan.id, details.loan.item_id, actor.lab_id, details.loan.returned_at, details.loan.due_date) } : {}),
     };
     return Response.json(response, { headers: { "Cache-Control": "private, no-store", "X-Request-Id": actor.rid } });
   } catch (error) { return loansFailure(error); }
