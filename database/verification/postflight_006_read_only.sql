@@ -23,6 +23,27 @@ runtime_roles(role_name, group_name) AS (
     ('unitrack_equipment_runtime', 'unitrack_equipment_service'),
     ('unitrack_loans_runtime', 'unitrack_loans_service')
 ),
+expected_group_memberships(
+  member_name,
+  group_name,
+  grantor_name,
+  admin_option,
+  inherit_option,
+  set_option
+) AS (
+  VALUES
+    -- Explicit runtime-to-service memberships provisioned by the database
+    -- owner. PostgreSQL 16+ records INHERIT/SET options independently.
+    ('unitrack_users_runtime', 'unitrack_users_service', 'postgres', false, true, true),
+    ('unitrack_equipment_runtime', 'unitrack_equipment_service', 'postgres', false, true, true),
+    ('unitrack_loans_runtime', 'unitrack_loans_service', 'postgres', false, true, true),
+    -- Supabase grants its non-superuser postgres role administrative control
+    -- of roles created through that account. These memberships confer neither
+    -- inherited privileges nor SET ROLE capability.
+    ('postgres', 'unitrack_users_service', 'supabase_admin', true, false, false),
+    ('postgres', 'unitrack_equipment_service', 'supabase_admin', true, false, false),
+    ('postgres', 'unitrack_loans_service', 'supabase_admin', true, false, false)
+),
 owned_tables(table_name, owner_group) AS (
   VALUES
     ('labs', 'unitrack_users_service'),
@@ -164,9 +185,13 @@ checks AS (
         FROM pg_auth_members AS membership
         JOIN pg_roles AS granted_role ON granted_role.oid = membership.roleid
         JOIN pg_roles AS member_role ON member_role.oid = membership.member
+        JOIN pg_roles AS grantor_role ON grantor_role.oid = membership.grantor
         WHERE granted_role.rolname = expected_membership.group_name
           AND member_role.rolname = expected_membership.role_name
           AND NOT membership.admin_option
+          AND membership.inherit_option
+          AND membership.set_option
+          AND grantor_role.rolname = 'postgres'
       )
     )
     AND NOT EXISTS (
@@ -180,14 +205,53 @@ checks AS (
         )
     )
     AND NOT EXISTS (
-      SELECT 1
-      FROM pg_auth_members AS membership
-      JOIN pg_roles AS granted_role ON granted_role.oid = membership.roleid
-      JOIN pg_roles AS member_role ON member_role.oid = membership.member
-      WHERE granted_role.rolname IN (SELECT role_name FROM service_groups)
-        AND (member_role.rolname, granted_role.rolname) NOT IN (
-          SELECT role_name, group_name FROM runtime_roles
-        )
+      (
+        SELECT
+          expected.member_name,
+          expected.group_name,
+          expected.grantor_name,
+          expected.admin_option,
+          expected.inherit_option,
+          expected.set_option
+        FROM expected_group_memberships AS expected
+        EXCEPT
+        SELECT
+          member_role.rolname,
+          granted_role.rolname,
+          grantor_role.rolname,
+          membership.admin_option,
+          membership.inherit_option,
+          membership.set_option
+        FROM pg_auth_members AS membership
+        JOIN pg_roles AS granted_role ON granted_role.oid = membership.roleid
+        JOIN pg_roles AS member_role ON member_role.oid = membership.member
+        JOIN pg_roles AS grantor_role ON grantor_role.oid = membership.grantor
+        WHERE granted_role.rolname IN (SELECT role_name FROM service_groups)
+      )
+      UNION ALL
+      (
+        SELECT
+          member_role.rolname,
+          granted_role.rolname,
+          grantor_role.rolname,
+          membership.admin_option,
+          membership.inherit_option,
+          membership.set_option
+        FROM pg_auth_members AS membership
+        JOIN pg_roles AS granted_role ON granted_role.oid = membership.roleid
+        JOIN pg_roles AS member_role ON member_role.oid = membership.member
+        JOIN pg_roles AS grantor_role ON grantor_role.oid = membership.grantor
+        WHERE granted_role.rolname IN (SELECT role_name FROM service_groups)
+        EXCEPT
+        SELECT
+          expected.member_name,
+          expected.group_name,
+          expected.grantor_name,
+          expected.admin_option,
+          expected.inherit_option,
+          expected.set_option
+        FROM expected_group_memberships AS expected
+      )
     )
     AND NOT EXISTS (
       SELECT 1
@@ -195,7 +259,7 @@ checks AS (
       JOIN pg_roles AS member_role ON member_role.oid = membership.member
       WHERE member_role.rolname IN (SELECT role_name FROM service_groups)
     ),
-    'Each runtime login inherits exactly its matching group; groups inherit nothing; no ADMIN OPTION'
+    'Exact runtime memberships plus non-inheriting/non-settable Supabase postgres administration; groups inherit nothing'
 
   UNION ALL
   SELECT
