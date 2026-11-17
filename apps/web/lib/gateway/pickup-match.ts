@@ -10,6 +10,11 @@ import { AuthorizationError } from "@/lib/auth/errors";
 import { trustedIdentity, callLoans } from "./loans";
 import { createServiceCaller } from "./call-service";
 
+type PickupEligibility =
+  | "upcoming"
+  | "eligible"
+  | "expired";
+
 type PickupMatchResponse = {
   activeLoan: {
     id: string;
@@ -19,7 +24,10 @@ type PickupMatchResponse = {
     id: string;
     startAt: string;
     endAt: string;
+    eligibility: PickupEligibility;
   }[];
+  multipleEligibleReservations: boolean;
+  canHandover: boolean;
 };
 
 function isPickupMatchResponse(
@@ -62,11 +70,41 @@ function isPickupMatchResponse(
         !Number.isNaN(Date.parse(reservation.startAt)) &&
         !Number.isNaN(Date.parse(reservation.endAt)) &&
         Date.parse(reservation.endAt) >
-          Date.parse(reservation.startAt)
+          Date.parse(reservation.startAt) &&
+        (
+          reservation.eligibility === "upcoming" ||
+          reservation.eligibility === "eligible" ||
+          reservation.eligibility === "expired"
+        )
       );
     });
 
-  return validLoan && validReservations;
+  if (
+    !validLoan ||
+    !validReservations ||
+    typeof data.multipleEligibleReservations !== "boolean" ||
+    typeof data.canHandover !== "boolean"
+  ) {
+    return false;
+  }
+
+  const reservations =
+    data.confirmedReservations as PickupMatchResponse["confirmedReservations"];
+
+  const eligibleCount = reservations.filter(
+    (reservation) => reservation.eligibility === "eligible",
+  ).length;
+
+  // Reject inconsistent eligibility information.
+  if (data.multipleEligibleReservations !== (eligibleCount > 1)) {
+    return false;
+  }
+
+  if (data.canHandover !== (loan === null && eligibleCount === 1)) {
+    return false;
+  }
+
+  return true;
 }
 
 function failure(
@@ -149,7 +187,7 @@ export async function forwardPickupMatch(
       );
     }
 
-    // Ask Loans for confirmed reservations and active loans.
+    // Ask Loans for reservations, eligibility and active loans.
     const loansResponse = await callLoans(
       "/reservations/pickup?itemId=" +
         encodeURIComponent(itemId),
@@ -183,8 +221,22 @@ export async function forwardPickupMatch(
           name: equipmentPayload.name,
           status: equipmentPayload.status,
         },
-        activeLoan: matchPayload.activeLoan,
-        confirmedReservations: matchPayload.confirmedReservations,
+        activeLoan: matchPayload.activeLoan
+          ? {
+              id: matchPayload.activeLoan.id,
+              dueDate: matchPayload.activeLoan.dueDate,
+            }
+          : null,
+        confirmedReservations:
+          matchPayload.confirmedReservations.map((reservation) => ({
+            id: reservation.id,
+            startAt: reservation.startAt,
+            endAt: reservation.endAt,
+            eligibility: reservation.eligibility,
+          })),
+        multipleEligibleReservations:
+          matchPayload.multipleEligibleReservations,
+        canHandover: matchPayload.canHandover,
       },
       {
         headers: {

@@ -30,6 +30,7 @@ import { GET } from "@/app/api/reservations/pickup/route";
 const itemId = "11111111-1111-4111-8111-111111111111";
 const reservationId = "22222222-2222-4222-8222-222222222222";
 const loanId = "33333333-3333-4333-8333-333333333333";
+const secondReservationId = "55555555-5555-4555-8555-555555555555";
 
 const identity = {
   kind: "user" as const,
@@ -46,9 +47,18 @@ const equipment = {
   status: "available",
 };
 
+const reservation = {
+  id: reservationId,
+  startAt: "2026-11-17T09:00:00.000Z",
+  endAt: "2026-11-17T11:00:00.000Z",
+  eligibility: "eligible",
+};
+
 const emptyMatch = {
   activeLoan: null,
   confirmedReservations: [],
+  multipleEligibleReservations: false,
+  canHandover: false,
 };
 
 function request(id: string = itemId): Request {
@@ -77,16 +87,11 @@ afterEach(() => {
 });
 
 describe("GET /api/reservations/pickup", () => {
-  it("returns equipment with a confirmed reservation", async () => {
+  it("returns equipment with an eligible reservation", async () => {
     const match = {
-      activeLoan: null,
-      confirmedReservations: [
-        {
-          id: reservationId,
-          startAt: "2026-11-17T09:00:00.000Z",
-          endAt: "2026-11-17T11:00:00.000Z",
-        },
-      ],
+      ...emptyMatch,
+      confirmedReservations: [reservation],
+      canHandover: true,
     };
 
     mocks.loans.mockResolvedValueOnce(json(match));
@@ -119,18 +124,38 @@ describe("GET /api/reservations/pickup", () => {
     );
   });
 
-  it("returns an active loan for borrowed equipment", async () => {
+  it.each(["upcoming", "expired"])(
+    "returns a %s reservation without enabling handover",
+    async (eligibility) => {
+      const match = {
+        ...emptyMatch,
+        confirmedReservations: [
+          { ...reservation, eligibility },
+        ],
+      };
+
+      mocks.loans.mockResolvedValueOnce(json(match));
+
+      const response = await GET(request());
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject(match);
+    },
+  );
+
+  it("returns an active loan without enabling handover", async () => {
     mocks.equipment.mockResolvedValueOnce(
       json({ ...equipment, status: "checked_out" }),
     );
 
     mocks.loans.mockResolvedValueOnce(
       json({
+        ...emptyMatch,
         activeLoan: {
           id: loanId,
           dueDate: "2026-11-20T09:00:00.000Z",
         },
-        confirmedReservations: [],
+        confirmedReservations: [reservation],
       }),
     );
 
@@ -140,6 +165,28 @@ describe("GET /api/reservations/pickup", () => {
     expect(response.status).toBe(200);
     expect(data.activeLoan.id).toBe(loanId);
     expect(data.equipment.status).toBe("checked_out");
+    expect(data.canHandover).toBe(false);
+  });
+
+  it("handles multiple eligible reservations without choosing one", async () => {
+    const match = {
+      ...emptyMatch,
+      confirmedReservations: [
+        reservation,
+        {
+          ...reservation,
+          id: secondReservationId,
+        },
+      ],
+      multipleEligibleReservations: true,
+    };
+
+    mocks.loans.mockResolvedValueOnce(json(match));
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject(match);
   });
 
   it("handles equipment with no matching reservation", async () => {
@@ -149,18 +196,21 @@ describe("GET /api/reservations/pickup", () => {
     expect(await response.json()).toMatchObject(emptyMatch);
   });
 
-  it("rejects unauthorized users before calling services", async () => {
-    mocks.identity.mockResolvedValueOnce({
-      ...identity,
-      role: "student",
-    });
+  it.each(["student", "professor", "lab_manager"])(
+    "rejects reservation matching for the %s role",
+    async (role) => {
+      mocks.identity.mockResolvedValueOnce({
+        ...identity,
+        role,
+      });
 
-    const response = await GET(request());
+      const response = await GET(request());
 
-    expect(response.status).toBe(403);
-    expect(mocks.equipment).not.toHaveBeenCalled();
-    expect(mocks.loans).not.toHaveBeenCalled();
-  });
+      expect(response.status).toBe(403);
+      expect(mocks.equipment).not.toHaveBeenCalled();
+      expect(mocks.loans).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects invalid equipment IDs", async () => {
     const response = await GET(request("invalid-id"));
@@ -206,7 +256,7 @@ describe("GET /api/reservations/pickup", () => {
   it("rejects malformed Loans Service responses", async () => {
     mocks.loans.mockResolvedValueOnce(
       json({
-        activeLoan: null,
+        ...emptyMatch,
         confirmedReservations: "invalid",
       }),
     );
@@ -214,6 +264,94 @@ describe("GET /api/reservations/pickup", () => {
     const response = await GET(request());
 
     expect(response.status).toBe(502);
+  });
+
+  it("rejects invalid eligibility values", async () => {
+    mocks.loans.mockResolvedValueOnce(
+      json({
+        ...emptyMatch,
+        confirmedReservations: [
+          { ...reservation, eligibility: "unknown" },
+        ],
+      }),
+    );
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(502);
+  });
+
+  it("rejects handover permission without an eligible reservation", async () => {
+    mocks.loans.mockResolvedValueOnce(
+      json({
+        ...emptyMatch,
+        canHandover: true,
+      }),
+    );
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(502);
+  });
+
+  it("rejects handover permission when an active loan exists", async () => {
+    mocks.loans.mockResolvedValueOnce(
+      json({
+        ...emptyMatch,
+        activeLoan: {
+          id: loanId,
+          dueDate: "2026-11-20T09:00:00.000Z",
+        },
+        confirmedReservations: [reservation],
+        canHandover: true,
+      }),
+    );
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(502);
+  });
+
+  it("rejects inconsistent multiple-reservation information", async () => {
+    mocks.loans.mockResolvedValueOnce(
+      json({
+        ...emptyMatch,
+        confirmedReservations: [
+          reservation,
+          {
+            ...reservation,
+            id: secondReservationId,
+          },
+        ],
+        multipleEligibleReservations: false,
+      }),
+    );
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(502);
+  });
+
+  it("does not expose extra fields from the Loans Service", async () => {
+    mocks.loans.mockResolvedValueOnce(
+      json({
+        ...emptyMatch,
+        confirmedReservations: [
+          {
+            ...reservation,
+            privateInformation: "private-test-value",
+          },
+        ],
+        canHandover: true,
+      }),
+    );
+
+    const response = await GET(request());
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).not.toContain("privateInformation");
+    expect(body).not.toContain("private-test-value");
   });
 
   it("handles Loans Service failures", async () => {

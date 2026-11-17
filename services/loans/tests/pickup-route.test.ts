@@ -17,6 +17,7 @@ const itemId = "11111111-1111-4111-8111-111111111111";
 const reservationId = "22222222-2222-4222-8222-222222222222";
 const loanId = "33333333-3333-4333-8333-333333333333";
 const userId = "44444444-4444-4444-8444-444444444444";
+const secondReservationId = "55555555-5555-4555-8555-555555555555";
 
 const assistant = {
   kind: "user",
@@ -28,8 +29,23 @@ const assistant = {
 
 const mockLookup = vi.mocked(getPickupMatch);
 
+const reservation = {
+  id: reservationId,
+  startAt: "2026-11-17T09:00:00.000Z",
+  endAt: "2026-11-17T11:00:00.000Z",
+  eligibility: "eligible" as const,
+};
+
+const emptyMatch = {
+  activeLoan: null,
+  confirmedReservations: [],
+  multipleEligibleReservations: false,
+  canHandover: false,
+};
+
 async function makeRequest(
-  role: "lab_assistant" | "student" = "lab_assistant",
+  role: "lab_assistant" | "student" | "professor" | "lab_manager" =
+    "lab_assistant",
   id: string = itemId,
 ): Promise<Request> {
   const token = await signInternalToken(
@@ -65,12 +81,15 @@ describe("GET /reservations/pickup", () => {
     expect(mockLookup).not.toHaveBeenCalled();
   });
 
-  it("rejects users without the laboratory assistant role", async () => {
-    const response = await GET(await makeRequest("student"));
+  it.each(["student", "professor", "lab_manager"] as const)(
+    "rejects reservation matching for the %s role",
+    async (role) => {
+      const response = await GET(await makeRequest(role));
 
-    expect(response.status).toBe(403);
-    expect(mockLookup).not.toHaveBeenCalled();
-  });
+      expect(response.status).toBe(403);
+      expect(mockLookup).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects invalid equipment IDs", async () => {
     const response = await GET(
@@ -81,16 +100,11 @@ describe("GET /reservations/pickup", () => {
     expect(mockLookup).not.toHaveBeenCalled();
   });
 
-  it("returns confirmed reservations for the requesting lab", async () => {
+  it("returns an eligible reservation for the requesting lab", async () => {
     const match = {
-      activeLoan: null,
-      confirmedReservations: [
-        {
-          id: reservationId,
-          startAt: "2026-11-17T09:00:00.000Z",
-          endAt: "2026-11-17T11:00:00.000Z",
-        },
-      ],
+      ...emptyMatch,
+      confirmedReservations: [reservation],
+      canHandover: true,
     };
 
     mockLookup.mockResolvedValue(match);
@@ -105,13 +119,54 @@ describe("GET /reservations/pickup", () => {
     );
   });
 
-  it("returns an active loan when the item is borrowed", async () => {
+  it.each(["upcoming", "expired"] as const)(
+    "returns a %s reservation without enabling handover",
+    async (eligibility) => {
+      const match = {
+        ...emptyMatch,
+        confirmedReservations: [
+          { ...reservation, eligibility },
+        ],
+      };
+
+      mockLookup.mockResolvedValue(match);
+
+      const response = await GET(await makeRequest());
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(match);
+    },
+  );
+
+  it("returns an active loan without enabling handover", async () => {
     const match = {
+      ...emptyMatch,
       activeLoan: {
         id: loanId,
         dueDate: "2026-11-20T09:00:00.000Z",
       },
-      confirmedReservations: [],
+      confirmedReservations: [reservation],
+    };
+
+    mockLookup.mockResolvedValue(match);
+
+    const response = await GET(await makeRequest());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(match);
+  });
+
+  it("returns multiple eligible reservations without choosing one", async () => {
+    const match = {
+      ...emptyMatch,
+      confirmedReservations: [
+        reservation,
+        {
+          ...reservation,
+          id: secondReservationId,
+        },
+      ],
+      multipleEligibleReservations: true,
     };
 
     mockLookup.mockResolvedValue(match);
@@ -123,22 +178,18 @@ describe("GET /reservations/pickup", () => {
   });
 
   it("handles equipment with no matching reservation or loan", async () => {
-    mockLookup.mockResolvedValue({
-      activeLoan: null,
-      confirmedReservations: [],
-    });
+    mockLookup.mockResolvedValue(emptyMatch);
 
     const response = await GET(await makeRequest());
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      activeLoan: null,
-      confirmedReservations: [],
-    });
+    expect(await response.json()).toEqual(emptyMatch);
   });
 
   it("handles database failures without exposing details", async () => {
-    mockLookup.mockRejectedValue(new Error("private database details"));
+    mockLookup.mockRejectedValue(
+      new Error("private database details"),
+    );
 
     const response = await GET(await makeRequest());
     const body = await response.text();

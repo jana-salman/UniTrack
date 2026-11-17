@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import EquipmentQrScanner from "@/components/equipment/equipment-qr-scanner";
 
+type PickupEligibility = "upcoming" | "eligible" | "expired";
+
 type PickupMatch = {
   equipment: {
     id: string;
@@ -19,34 +21,58 @@ type PickupMatch = {
     id: string;
     startAt: string;
     endAt: string;
+    eligibility: PickupEligibility;
   }[];
+  multipleEligibleReservations: boolean;
+  canHandover: boolean;
 };
 
 type ScanResultProps = {
   canViewReservations: boolean;
 };
 
+const eligibilityLabels: Record<PickupEligibility, string> = {
+  upcoming: "Upcoming",
+  eligible: "Eligible for pickup",
+  expired: "Pickup window expired",
+};
+
+const eligibilityStyles: Record<PickupEligibility, string> = {
+  upcoming: "border-blue-200 bg-blue-50 text-blue-900",
+  eligible: "border-emerald-200 bg-emerald-50 text-emerald-900",
+  expired: "border-slate-200 bg-slate-50 text-slate-600",
+};
+
 export default function ScanResult({
   canViewReservations,
 }: ScanResultProps) {
-  const [scannedId, setScannedId] = useState<string | null>(null);
+  const [scan, setScan] = useState<{
+    itemId: string;
+  } | null>(null);
+
   const [match, setMatch] = useState<PickupMatch | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const scannedId = scan?.itemId ?? null;
+
+  function handleScan(itemId: string) {
+    setMatch(null);
+    setError(null);
+    setLoading(canViewReservations);
+    setScan({ itemId });
+  }
+
   useEffect(() => {
-    if (!scannedId || !canViewReservations) return;
+    if (!scan || !canViewReservations) return;
 
     const controller = new AbortController();
+    const itemId = scan.itemId;
 
     async function loadMatch() {
-      setLoading(true);
-      setMatch(null);
-      setError(null);
-
       try {
         const response = await fetch(
-          `/api/reservations/pickup?itemId=${encodeURIComponent(scannedId!)}`,
+          `/api/reservations/pickup?itemId=${encodeURIComponent(itemId)}`,
           {
             signal: controller.signal,
             cache: "no-store",
@@ -54,6 +80,10 @@ export default function ScanResult({
         );
 
         if (!response.ok) {
+          if (response.status === 401) {
+            throw new Error("Please sign in again.");
+          }
+
           if (response.status === 403) {
             throw new Error(
               "You do not have permission to view pickup information.",
@@ -92,11 +122,11 @@ export default function ScanResult({
     void loadMatch();
 
     return () => controller.abort();
-  }, [scannedId, canViewReservations]);
+  }, [scan, canViewReservations]);
 
   return (
     <section className="space-y-6">
-      <EquipmentQrScanner onScan={setScannedId} />
+      <EquipmentQrScanner onScan={handleScan} />
 
       {scannedId && (
         <div className="max-w-lg space-y-4 rounded-xl border border-slate-200 bg-white p-5">
@@ -121,6 +151,17 @@ export default function ScanResult({
             )}
           </div>
 
+          {canViewReservations && (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => handleScan(scannedId)}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Refresh matching results
+            </button>
+          )}
+
           {canViewReservations && loading && (
             <p role="status" className="text-sm text-slate-600">
               Checking reservations and active loans...
@@ -144,11 +185,11 @@ export default function ScanResult({
                 </h3>
 
                 <p className="mt-1 text-sm text-slate-600">
-                  Status: {match.equipment.status}
+                  Status: {match.equipment.status.replaceAll("_", " ")}
                 </p>
               </div>
 
-              {match.activeLoan ? (
+              {match.activeLoan && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <h3 className="font-semibold text-amber-900">
                     Active Loan Found
@@ -168,7 +209,19 @@ export default function ScanResult({
                     View Return
                   </Link>
                 </div>
-              ) : match.confirmedReservations.length > 0 ? (
+              )}
+
+              {match.multipleEligibleReservations && (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+                >
+                  Multiple reservations are currently eligible.
+                  Resolve the conflict before proceeding with handover.
+                </div>
+              )}
+
+              {match.confirmedReservations.length > 0 && (
                 <div className="space-y-3">
                   <h3 className="font-semibold text-slate-900">
                     Confirmed Reservations
@@ -177,35 +230,58 @@ export default function ScanResult({
                   {match.confirmedReservations.map((reservation) => (
                     <div
                       key={reservation.id}
-                      className="rounded-lg border border-blue-200 bg-blue-50 p-4"
+                      className={`rounded-lg border p-4 ${
+                        eligibilityStyles[reservation.eligibility]
+                      }`}
                     >
-                      <p className="text-sm text-blue-900">
+                      <h4 className="text-sm font-semibold">
+                        {eligibilityLabels[reservation.eligibility]}
+                      </h4>
+
+                      <p className="mt-2 text-sm">
                         Start:{" "}
                         {new Date(
                           reservation.startAt,
                         ).toLocaleString()}
                       </p>
 
-                      <p className="mt-1 text-sm text-blue-900">
+                      <p className="mt-1 text-sm">
                         End:{" "}
                         {new Date(
                           reservation.endAt,
                         ).toLocaleString()}
                       </p>
 
-                      <p className="mt-3 text-sm text-blue-800">
-                        Reservation confirmed. Pickup eligibility
-                        must be verified before handover.
-                      </p>
+                      {match.canHandover &&
+                      reservation.eligibility === "eligible" ? (
+                        <Link
+                          href={`/handover/${reservation.id}`}
+                          prefetch={false}
+                          className="mt-3 inline-block rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+                        >
+                          Proceed to Handover
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled
+                          className="mt-3 cursor-not-allowed rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-500"
+                        >
+                          Handover unavailable
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
-              ) : (
-                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-700">
-                  No confirmed reservation or active loan found for
-                  this equipment.
-                </p>
               )}
+
+              {!match.activeLoan &&
+                match.confirmedReservations.length === 0 && (
+                  <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-700">
+                    No confirmed reservation or active loan found for
+                    this equipment.
+                  </p>
+                )}
             </div>
           )}
         </div>
