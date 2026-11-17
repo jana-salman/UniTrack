@@ -97,4 +97,47 @@ END;
 $$;
 ROLLBACK;
 
+-- Confirmation immutability + Return compatibility, as the restricted Loans
+-- group, on a synthetic loan that is rolled back.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'loans_student_confirmation_immutable'
+                 AND tgrelid = 'public.loans'::regclass AND tgenabled <> 'D' AND NOT tgisinternal) THEN
+    RAISE EXCEPTION 'S2-09 verification failed: confirmation immutability trigger missing or disabled';
+  END IF;
+END;
+$$;
+BEGIN;
+SET LOCAL ROLE unitrack_loans_service;
+INSERT INTO public.loans (id, item_id, borrower_id, lab_id, due_date, student_confirmed_at)
+VALUES ('00000000-0000-4000-8000-000000000498', '00000000-0000-4000-8000-000000000101',
+        '00000000-0000-4000-8000-000000000002', 7001, now() + interval '1 day', now());
+-- The existing Return workflow's updates still work on a handover loan.
+UPDATE public.loans SET return_operation = '{"state":"planned"}'::jsonb WHERE id = '00000000-0000-4000-8000-000000000498';
+UPDATE public.loans SET returned_at = now() + interval '1 second' WHERE id = '00000000-0000-4000-8000-000000000498';
+DO $$
+BEGIN
+  BEGIN
+    UPDATE public.loans SET student_confirmed_at = NULL WHERE id = '00000000-0000-4000-8000-000000000498';
+    RAISE EXCEPTION 'S2-09 verification failed: a student confirmation was cleared';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM NOT LIKE 'loans.student_confirmed_at cannot be changed%' THEN RAISE; END IF;
+  END;
+  BEGIN
+    UPDATE public.loans SET student_confirmed_at = now() - interval '1 day' WHERE id = '00000000-0000-4000-8000-000000000498';
+    RAISE EXCEPTION 'S2-09 verification failed: a student confirmation was rewritten';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM NOT LIKE 'loans.student_confirmed_at cannot be changed%' THEN RAISE; END IF;
+  END;
+  BEGIN
+    -- A legacy (pre-S2-09) loan cannot gain a confirmation retroactively.
+    UPDATE public.loans SET student_confirmed_at = now() WHERE id = '00000000-0000-4000-8000-000000000201';
+    RAISE EXCEPTION 'S2-09 verification failed: a legacy loan gained a confirmation';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM NOT LIKE 'loans.student_confirmed_at cannot be changed%' THEN RAISE; END IF;
+  END;
+END;
+$$;
+ROLLBACK;
+
 SELECT 'PASS: C430PRJCT-40 handover columns, column grants, RLS and custody protections' AS result;

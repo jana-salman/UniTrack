@@ -52,14 +52,18 @@ switch ($Action) {
   }
   'Run' {
     if (-not $Service) { throw 'Pass -Service users, equipment or loans.' }
-    $names = @('DATABASE_URL', 'LOANS_DATABASE_SESSION_AFFINITY')
+    $names = @('DATABASE_URL', 'LOANS_DATABASE_SESSION_AFFINITY', 'USERS_SERVICE_URL')
     $previous = @{}
     foreach ($name in $names) { $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
     Push-Location $repositoryRoot
     try {
       # Each service connects as its OWN restricted login (migration 006 groups).
       $env:DATABASE_URL = "postgresql://unitrack_${Service}_local:local_test_only@127.0.0.1:55432/unitrack_test"
-      if ($Service -eq 'loans') { $env:LOANS_DATABASE_SESSION_AFFINITY = 'confirmed' }
+      if ($Service -eq 'loans') {
+        $env:LOANS_DATABASE_SESSION_AFFINITY = 'confirmed'
+        # S2-09 borrower verification calls Users; only set when not configured.
+        if (-not $env:USERS_SERVICE_URL) { $env:USERS_SERVICE_URL = 'http://localhost:3001' }
+      }
       Write-Host "Starting $Service as unitrack_${Service}_local (press Ctrl+C to stop)..."
       npm run dev --workspace=@unitrack/$Service
       if ($LASTEXITCODE -ne 0) {
@@ -72,7 +76,7 @@ switch ($Action) {
         if ($null -eq $previous[$name]) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
         else { Set-Item "Env:$name" $previous[$name] }
       }
-      Write-Host 'Restored this terminal''s DATABASE_URL and LOANS_DATABASE_SESSION_AFFINITY.'
+      Write-Host 'Restored this terminal''s DATABASE_URL, LOANS_DATABASE_SESSION_AFFINITY and USERS_SERVICE_URL.'
     }
   }
   'Teardown' {

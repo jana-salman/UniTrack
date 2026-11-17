@@ -2,6 +2,7 @@ import { isProfileId } from "@unitrack/contracts";
 import { requireUser } from "../../../lib/authorization";
 import { LoansError, loansFailure } from "../../../lib/errors";
 import { handoverEquipmentHttp } from "../../../lib/equipment-http";
+import { usersHttp } from "../../../lib/users-http";
 import { getHandoverDetails } from "../../../lib/handover/queries";
 import { confirmHandover } from "../../../lib/handover/service";
 
@@ -15,7 +16,7 @@ export async function GET(request: Request, context: Context) {
     const actor = await requireUser(request, ["lab_assistant"]);
     const { reservationId } = await context.params;
     if (!isProfileId(reservationId)) throw new LoansError(400, "invalid_reservation", "Invalid reservation ID.");
-    const details = await getHandoverDetails(reservationId.toLowerCase(), actor.lab_id);
+    const details = await getHandoverDetails(reservationId.toLowerCase(), actor.lab_id, actor.sub);
     if (!details) throw new LoansError(404, "reservation_not_found", "Reservation not found.");
     return Response.json(details, { headers: headers(actor.rid) });
   } catch (error) { return loansFailure(error); }
@@ -28,6 +29,6 @@ export async function POST(request: Request, context: Context) {
     if (!isProfileId(reservationId)) throw new LoansError(400, "invalid_reservation", "Invalid reservation ID.");
     let body: unknown;
     try { body = await request.json(); } catch { throw new LoansError(400, "invalid_handover", "Invalid handover information. Check every component."); }
-    return Response.json(await confirmHandover(reservationId, body, actor, handoverEquipmentHttp(actor)), { headers: headers(actor.rid) });
+    return Response.json(await confirmHandover(reservationId, body, actor, { equipment: handoverEquipmentHttp(actor), users: usersHttp(actor) }), { headers: headers(actor.rid) });
   } catch (error) { return loansFailure(error); }
 }

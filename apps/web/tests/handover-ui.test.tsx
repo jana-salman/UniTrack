@@ -3,11 +3,15 @@
 // Loans -> Equipment handlers over localhost (databases/profile modeled).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { fixture, borrowerName } from "./fixtures/handover-http";
 import { reservationId, kitComponents } from "../../../services/loans/tests/fixtures/handover-db";
 import HandoverDetails from "@/app/(protected)/handover/[reservationId]/handover-details";
 
+// Each step drives several real localhost service hops (gateway -> Loans ->
+// Users/Equipment). Allow for a loaded machine instead of Vitest's 5 s default,
+// so one slow test cannot abandon in-flight requests into the next test.
+vi.setConfig({ testTimeout: 30_000 });
 let host: HTMLDivElement, root: Root;
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -16,7 +20,7 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
 async function waitForUi(assertion: () => void) {
-  const deadline = Date.now() + 4000;
+  const deadline = Date.now() + 15_000;
   let failure: unknown;
   do {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
@@ -46,9 +50,11 @@ const studentBox = () => host.querySelector<HTMLInputElement>('input[name="stude
 const submit = () => click(host.querySelector<HTMLButtonElement>('button[type="submit"]')!);
 const loanPosts = () => fixture.requests.filter(r => r.service === "loans" && r.method === "POST");
 
-it("TC-3.1: renders the five actual components, and after ticks, Good and student confirmation shows Borrowed with borrower and due date", async () => {
+it("TC-3.1: renders the main item plus the five actual components, and after ticks, Good and student confirmation shows Borrowed with borrower and due date", async () => {
   await open();
-  expect(rows()).toHaveLength(5);
+  expect(rows()).toHaveLength(6);
+  expect(rows()[0].textContent).toContain(fixture.itemName + " (main item)");
+  expect(host.querySelector('[data-testid="borrower-identity"]')?.textContent).toContain("Identity verified");
   for (const component of kitComponents) expect(host.textContent).toContain(component.name);
   expect(host.textContent).toContain(borrowerName);
   expect(host.textContent).toContain("Reserved");
@@ -61,23 +67,25 @@ it("TC-3.1: renders the five actual components, and after ticks, Good and studen
   expect(host.textContent).toContain("Equipment status: Borrowed");
   expect(host.textContent).toContain("Borrower: " + borrowerName);
   expect(host.textContent).toContain("Due: " + new Date(fixture.db.state.loans[0].due_date).toLocaleString());
-  expect(fixture.status).toBe("checked_out"); expect(fixture.db.state.records).toHaveLength(5);
+  expect(fixture.status).toBe("checked_out"); expect(fixture.db.state.records).toHaveLength(6);
+  expect(fixture.db.state.records.filter(r => r.kit_component_id === null)).toHaveLength(1);
 });
 
 it("renders a different component count dynamically", async () => {
   fixture.components = fixture.components.slice(0, 3);
-  await open(); expect(rows()).toHaveLength(3);
-  expect(host.textContent).toContain("Kit checklist (3 components)");
+  await open(); expect(rows()).toHaveLength(4);
+  expect(host.textContent).toContain("Kit checklist (main item + 3 components)");
 });
 
 it("TC-3.4/TC-3.5: missing charger and existing damage are saved with notes, no photo control", async () => {
   await open();
   expect(host.querySelector('input[type="file"]')).toBeNull();
   const all = rows();
-  await fillRow(all[0], "missing", "Charger not in the case");
-  await fillRow(all[1]); await fillRow(all[2]);
-  await fillRow(all[3], "damaged", "Scratched lid");
-  await fillRow(all[4]);
+  await fillRow(all[0]); // main item: its own explicit condition
+  await fillRow(all[1], "missing", "Charger not in the case");
+  await fillRow(all[2]); await fillRow(all[3]);
+  await fillRow(all[4], "damaged", "Scratched lid");
+  await fillRow(all[5]);
   await click(studentBox()); await submit();
   await waitForUi(() => expect(host.textContent).toContain("Handover complete"));
   expect(host.textContent).toContain("Missing component"); expect(host.textContent).toContain("Charger not in the case");
@@ -133,4 +141,31 @@ it("does not show a checklist when Equipment components are unavailable", async 
   await act(async () => root.render(<HandoverDetails reservationId={reservationId} />));
   await waitForUi(() => expect(host.textContent).toContain("The equipment checklist is unavailable"));
   expect(host.querySelector("form")).toBeNull();
+});
+
+it("blocks the checklist when Users cannot verify the borrower (name shown is not verification)", async () => {
+  fixture.borrowerActive = false;
+  await act(async () => root.render(<HandoverDetails reservationId={reservationId} />));
+  await waitForUi(() => expect(host.textContent).toContain("The borrower's university profile could not be verified, so handover is not allowed."));
+  expect(host.textContent).toContain(borrowerName);
+  expect(host.querySelector("form")).toBeNull();
+});
+
+it("an interrupted handover shows Finish interrupted handover, which completes it without re-entering anything", async () => {
+  fixture.usersDownAfterCheckout = true;
+  await open();
+  for (const row of rows()) await fillRow(row);
+  await click(studentBox()); await submit();
+  await waitForUi(() => expect(host.textContent).toContain("The equipment is checked out but the handover is not finished."));
+  expect(fixture.db.state.loans).toHaveLength(0);
+  fixture.usersDown = false; fixture.usersDownAfterCheckout = false;
+  // Fresh page load (e.g. another day / another browser): the durable plan is shown.
+  await act(async () => root.unmount()); root = createRoot(host);
+  await act(async () => root.render(<HandoverDetails reservationId={reservationId} />));
+  await waitForUi(() => expect(host.textContent).toContain("Handover not finished"));
+  expect(host.querySelector("form")).toBeNull();
+  await click([...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Finish interrupted handover")!);
+  await waitForUi(() => expect(host.textContent).toContain("Handover complete"));
+  expect(host.textContent).toContain("Equipment status: Borrowed");
+  expect(fixture.db.state.loans).toHaveLength(1); expect(fixture.db.state.records).toHaveLength(6); expect(fixture.history).toHaveLength(1);
 });

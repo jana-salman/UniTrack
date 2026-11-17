@@ -1,6 +1,8 @@
 // In-memory transaction/lock MODEL for S2-09 handover tests. Synthetic rows only.
 // No SQL is executed; this is not PostgreSQL proof (see the local-database test).
 import type { Pool } from "pg";
+import { createHash } from "node:crypto";
+import { canonicalChecklist } from "@unitrack/contracts";
 
 export const reservationId = "7c9e6679-7425-40de-944b-e07fc1f90001";
 export const kitItemId = "7c9e6679-7425-40de-944b-e07fc1f90002";
@@ -93,9 +95,14 @@ export function handoverDatabase() {
     if (text.includes("count(*)::int as count from public.loans where item_id = $1 and returned_at is null")) {
       return { rows: [{ count: state.loans.filter(l => l.item_id === values[0] && !l.returned_at).length }] };
     }
+    if (text.includes("handover_operation ->> 'state' in")) {
+      const op = r.handover_operation as { state?: string; actor?: string; result?: { borrowedAt?: string } } | null;
+      return { rows: values[0] === r.lab_id && op && ["planned", "applied", "compensating"].includes(op.state ?? "") ? [{ id: r.id, item_id: r.item_id, state: op.state, actor: op.actor, started: op.result?.borrowedAt }] : [] };
+    }
     if (text.includes("from public.reservations")) {
       if (values[0] !== r.id || values[1] !== r.lab_id) return { rows: [] };
-      return { rows: [{ ...structuredClone(r), operation_state: operationState() ?? null }] };
+      const op = r.handover_operation as { actor?: string; result?: { borrowedAt?: string } } | null;
+      return { rows: [{ ...structuredClone(r), operation_state: operationState() ?? null, operation_actor: op?.actor ?? null, operation_started: op?.result?.borrowedAt ?? null }] };
     }
     if (text.startsWith("update public.reservations set handover_operation")) {
       if (settings.dropPlanWrite || values[1] !== r.id || values[2] !== r.lab_id) return { rows: [] };
@@ -131,9 +138,13 @@ export function handoverDatabase() {
   return { state, settings, sql, pool: pool as unknown as Pool };
 }
 
-/** Ticked, Good rows for the given component IDs (or the main item when empty). */
+/** Ticked, Good rows: the MAIN ITEM (null) plus each given component ID. */
 export function goodChecklist(ids: readonly string[] = kitComponents.map(c => c.id)) {
-  return ids.length
-    ? ids.map(kitComponentId => ({ kitComponentId, checked: true, conditionStatus: "good", notes: "" }))
-    : [{ kitComponentId: null, checked: true, conditionStatus: "good", notes: "" }];
+  return [null, ...ids].map(kitComponentId => ({ kitComponentId, checked: true, conditionStatus: "good", notes: "" }));
+}
+
+/** Same checklist version the Web gateway and Loans compute from Equipment data. */
+export function checklistVersionFor(itemId: string, components: readonly { id: string; name: string; isActive: boolean; isRequired: boolean }[]) {
+  const canonical = canonicalChecklist(itemId, components.map(c => ({ id: c.id, component_name: c.name, is_active: c.isActive, is_required: c.isRequired })));
+  return createHash("sha256").update(canonical).digest("hex");
 }

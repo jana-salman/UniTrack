@@ -29,3 +29,10 @@ it("grants Loans only the handover columns, never table-wide or to other service
   for (const [, name] of sql.matchAll(/CREATE POLICY (\w+)/g)) expect(name).not.toMatch(/^unitrack_.*_service_/);
   expect(sql).toMatch(/WITH CHECK \(student_confirmed_at IS NOT NULL AND returned_at IS NULL\)/);
 });
+
+it("makes the student confirmation immutable without blocking Return's loan updates", () => {
+  expect(sql).toMatch(/CREATE OR REPLACE TRIGGER loans_student_confirmation_immutable\s+BEFORE UPDATE OF student_confirmed_at ON public\.loans/);
+  expect(sql).toMatch(/IF NEW\.student_confirmed_at IS DISTINCT FROM OLD\.student_confirmed_at THEN/);
+  // Only the confirmation column is guarded; returned_at/return_operation stay updatable.
+  expect(sql).not.toMatch(/BEFORE UPDATE ON public\.loans|returned_at IS DISTINCT|return_operation IS DISTINCT/);
+});

@@ -1,10 +1,16 @@
 import "server-only";
-import type { HandoverDetails, PickupCondition } from "@unitrack/contracts";
+import type { HandoverDetails, HandoverPending, HandoverPendingState, InterruptedHandover, PickupCondition } from "@unitrack/contracts";
 import { getDatabasePool } from "../db";
 
 interface ReservationRow {
   id: string; item_id: string; borrower_id: string; lab_id: number;
-  start_at: Date; end_at: Date; status: string; operation_state: string | null;
+  start_at: Date; end_at: Date; status: string;
+  operation_state: string | null; operation_actor: string | null; operation_started: string | null;
+}
+const UNFINISHED: readonly string[] = ["planned", "applied", "compensating"];
+/** Who may finish/undo: a confirmed checkout ('applied') needs no Equipment write. */
+function recoverable(state: string, starter: string | null, actorId: string): boolean {
+  return state === "applied" || starter === actorId;
 }
 interface LoanRow {
   id: string; item_id: string; borrowed_at: Date; due_date: Date;
@@ -12,11 +18,13 @@ interface LoanRow {
 }
 
 /** Same-lab reservation plus its completed handover, if any. No operation internals. */
-export async function getHandoverDetails(reservationId: string, labId: number): Promise<HandoverDetails | null> {
+export async function getHandoverDetails(reservationId: string, labId: number, actorId: string): Promise<HandoverDetails | null> {
   const pool = getDatabasePool();
   const reservation = (await pool.query<ReservationRow>(
     `select id, item_id, borrower_id, lab_id, start_at, end_at, status,
-            handover_operation ->> 'state' as operation_state
+            handover_operation ->> 'state' as operation_state,
+            handover_operation ->> 'actor' as operation_actor,
+            handover_operation -> 'result' ->> 'borrowedAt' as operation_started
      from public.reservations
      where id = $1 and lab_id = $2`,
     [reservationId, labId],
@@ -50,6 +58,32 @@ export async function getHandoverDetails(reservationId: string, labId: number): 
       returnedAt: loan.returned_at?.toISOString() ?? null,
       pickupConditions: pickup.map(row => ({ id: row.id, kit_component_id: row.kit_component_id, condition_status: row.condition_status, notes: row.notes })),
     } : null,
-    pendingOperation: !loan && reservation.operation_state !== null && reservation.operation_state !== "completed",
+    pending: !loan && reservation.operation_state && UNFINISHED.includes(reservation.operation_state) && reservation.operation_started
+      ? {
+        state: reservation.operation_state as HandoverPending["state"],
+        startedAt: new Date(reservation.operation_started).toISOString(),
+        recoverableByYou: recoverable(reservation.operation_state, reservation.operation_actor, actorId),
+      }
+      : null,
   };
+}
+
+/**
+ * Unfinished handovers in the actor's lab, oldest first, so staff can find and
+ * finish them without the original browser. No borrower or checklist data.
+ */
+export async function listInterruptedHandovers(labId: number, actorId: string): Promise<InterruptedHandover[]> {
+  const rows = (await getDatabasePool().query<{ id: string; item_id: string; state: string; actor: string | null; started: string | null }>(
+    `select id, item_id, handover_operation ->> 'state' as state, handover_operation ->> 'actor' as actor,
+            handover_operation -> 'result' ->> 'borrowedAt' as started
+     from public.reservations
+     where lab_id = $1 and handover_operation ->> 'state' in ('planned', 'applied', 'compensating')
+     order by started, id
+     limit 100`,
+    [labId],
+  )).rows;
+  return rows.filter(row => row.started).map(row => ({
+    reservationId: row.id, itemId: row.item_id, state: row.state as HandoverPendingState,
+    startedAt: new Date(row.started!).toISOString(), recoverableByYou: recoverable(row.state, row.actor, actorId),
+  }));
 }

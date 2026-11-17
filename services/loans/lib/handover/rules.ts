@@ -37,14 +37,17 @@ export function validateHandoverInput(value: unknown): ConfirmHandoverInput {
   });
   // Order carries no meaning; a stable order keeps retry fingerprints equal.
   conditions.sort((a, b) => { const left = a.kitComponentId ?? "", right = b.kitComponentId ?? ""; return left < right ? -1 : left > right ? 1 : 0; });
-  return { studentConfirmed: body.studentConfirmed === true, conditions };
+  if (typeof body.checklistVersion !== "string" || !/^[a-f0-9]{64}$/.test(body.checklistVersion)) throw new HandoverRuleError("Missing checklist version.");
+  return { studentConfirmed: body.studentConfirmed === true, checklistVersion: body.checklistVersion, conditions };
 }
 
 /**
- * Kits: exactly one row per ACTIVE kit component, using actual component IDs.
- * Non-kit equipment (no active components): exactly one main-item row (null),
- * which is the pickup shape the existing Return workflow compares against.
- * Every row must be ticked; a missing component is ticked AND marked missing.
+ * Every handover records the MAIN ITEM explicitly (kitComponentId null) - the
+ * kit itself or the non-kit item - plus, for kits, exactly one row per ACTIVE
+ * kit component using actual component IDs. This is the pickup shape the
+ * Return workflow compares against. Nothing is inferred: each row carries its
+ * own assistant-chosen condition. Every row must be ticked; a missing
+ * component is ticked AND marked missing.
  *
  * UNRESOLVED ASSUMPTION (awaiting Product Owner): checkout is allowed even when a
  * REQUIRED component is missing, because TC-3.4 needs the missing record saved
@@ -53,13 +56,15 @@ export function validateHandoverInput(value: unknown): ConfirmHandoverInput {
  */
 export function validateHandoverChecklist(components: HandoverKitComponent[], conditions: HandoverConditionInput[]): void {
   const active = new Set(components.filter(component => component.isActive).map(component => component.id.toLowerCase()));
+  const mainRows = conditions.filter(row => row.kitComponentId === null).length;
   if (active.size === 0) {
-    if (conditions.length !== 1 || conditions[0].kitComponentId !== null) throw new HandoverRuleError("Record the condition of the equipment item.");
+    if (conditions.length !== 1 || mainRows !== 1) throw new HandoverRuleError("Record the condition of the equipment item.");
   } else {
+    if (mainRows !== 1) throw new HandoverRuleError("Record the condition of the main item as well as every component.");
     for (const row of conditions) {
-      if (row.kitComponentId === null || !active.has(row.kitComponentId)) throw new HandoverRuleError("A checked component does not belong to this equipment.");
+      if (row.kitComponentId !== null && !active.has(row.kitComponentId)) throw new HandoverRuleError("A checked component does not belong to this equipment.");
     }
-    if (conditions.length !== active.size) throw new HandoverRuleError("Check every kit component listed for this equipment.");
+    if (conditions.length !== active.size + 1) throw new HandoverRuleError("Check every kit component listed for this equipment.");
   }
   if (conditions.some(row => row.checked !== true)) throw new HandoverRuleError("Tick every row after checking it.");
 }

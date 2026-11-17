@@ -14,6 +14,7 @@
 --     column of a reservation. Table-level ACLs from 006 are unchanged.
 --   * condition_records stays insert-only for Loans; loans/condition_records
 --     delete triggers and immutable history are untouched.
+--   * A trigger makes loans.student_confirmed_at immutable after insert.
 --
 -- Idempotent. If 006 is applied AFTER this file, run this file again: 006
 -- revokes all table privileges, which also removes these column grants.
@@ -21,6 +22,23 @@ BEGIN;
 
 ALTER TABLE public.loans ADD COLUMN IF NOT EXISTS student_confirmed_at TIMESTAMPTZ;
 ALTER TABLE public.reservations ADD COLUMN IF NOT EXISTS handover_operation JSONB;
+
+-- Custody protection: the student's confirmation is evidence and is fixed once
+-- the loan is inserted. 006 grants Loans table-level UPDATE on loans (Return
+-- needs returned_at/return_operation), so without this trigger a later update
+-- could add, change or clear a confirmation. Other columns are unaffected.
+CREATE OR REPLACE FUNCTION public.protect_loan_student_confirmation()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.student_confirmed_at IS DISTINCT FROM OLD.student_confirmed_at THEN
+    RAISE EXCEPTION 'loans.student_confirmed_at cannot be changed after the loan is created';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE OR REPLACE TRIGGER loans_student_confirmation_immutable
+BEFORE UPDATE OF student_confirmed_at ON public.loans
+FOR EACH ROW EXECUTE FUNCTION public.protect_loan_student_confirmation();
 
 DO $$
 BEGIN

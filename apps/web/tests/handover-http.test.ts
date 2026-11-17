@@ -1,13 +1,17 @@
 // S2-09 / C430PRJCT-40: Web gateway -> Loans -> Equipment over real localhost HTTP.
 import { describe, expect, it } from "vitest";
 import { fixture, routes, borrowerName, assistant, secret } from "./fixtures/handover-http";
-import { reservationId, kitItemId, assistantId, borrowerId, kitComponents } from "../../../services/loans/tests/fixtures/handover-db";
-const { GET, POST } = routes;
+import { reservationId, kitItemId, assistantId, borrowerId, kitComponents, checklistVersionFor } from "../../../services/loans/tests/fixtures/handover-db";
+const { GET, POST, RECOVER, LIST } = routes;
 import { AuthorizationError } from "@/lib/auth/errors";
 
-const checklist = (change: (row: { kitComponentId: string | null; checked: boolean; conditionStatus: string; notes: string }, index: number) => object = row => row) =>
-  kitComponents.map((c, index) => change({ kitComponentId: c.id, checked: true, conditionStatus: "good", notes: "" }, index));
-const confirmBody = (conditions = checklist(), studentConfirmed = true) => ({ studentConfirmed, conditions });
+type Row = { kitComponentId: string | null; checked: boolean; conditionStatus: string; notes: string };
+/** Main-item row (own condition) + one row per component; `change` sees component indexes. */
+const checklist = (change: (row: Row, index: number) => object = row => row, main: Partial<Row> = {}) =>
+  [{ kitComponentId: null, checked: true, conditionStatus: "good", notes: "", ...main }, ...kitComponents.map((c, index) => change({ kitComponentId: c.id, checked: true, conditionStatus: "good", notes: "" }, index))];
+/** The version the page received from the gateway for Equipment's current components. */
+const versionNow = () => checklistVersionFor(kitItemId, fixture.components.map(r => ({ id: r.id, name: r.component_name, isActive: r.is_active, isRequired: r.is_required })));
+const confirmBody = (conditions: object[] = checklist(), studentConfirmed = true) => ({ studentConfirmed, checklistVersion: versionNow(), conditions });
 const post = (body: unknown, headers?: Record<string, string>) => POST(fixture.browser("POST", body, headers), fixture.context());
 const view = async () => (await GET(fixture.browser("GET"), fixture.context())).json();
 
@@ -19,8 +23,9 @@ describe("handover gateway", () => {
     expect(data).toMatchObject({
       reservation: { id: reservationId, itemId: kitItemId, borrowerId, status: "confirmed", endAt: fixture.db.state.reservation.end_at.toISOString() },
       equipment: { name: "Five-component camera kit", assetCode: "KIT-HO-1", status: "reserved" },
-      borrower: { name: borrowerName }, handover: null, pendingOperation: false,
+      borrower: { name: borrowerName, identity: "verified" }, handover: null, pending: null,
     });
+    expect(data.checklistVersion).toBe(versionNow());
     expect(data.components).toEqual(kitComponents.map(c => ({ id: c.id, name: c.name, required: true })));
     expect(data.partialData).toBeUndefined();
   });
@@ -33,12 +38,13 @@ describe("handover gateway", () => {
     expect(fixture.status).toBe("checked_out");
     expect(fixture.history).toEqual([expect.objectContaining({ old_status: "reserved", new_status: "checked_out", changed_by: assistantId, request_key: expect.stringMatching(/^handover:.+:0:apply$/) })]);
     expect(fixture.db.state.loans).toHaveLength(1);
-    expect(fixture.db.state.records.map(r => r.kit_component_id).sort()).toEqual(kitComponents.map(c => c.id).sort());
+    expect(fixture.db.state.records).toHaveLength(6);
+    expect(fixture.db.state.records.map(r => r.kit_component_id ?? "main").sort()).toEqual(["main", ...kitComponents.map(c => c.id)].sort());
     const after = await view();
     expect(after.equipment.status).toBe("checked_out");
     expect(after.handover).toMatchObject({ loanId: outcome.loanId, dueDate: outcome.dueDate, studentConfirmedAt: outcome.studentConfirmedAt });
     expect(after.borrower.name).toBe(borrowerName);
-    expect(after.handover.pickupConditions).toHaveLength(5);
+    expect(after.handover.pickupConditions).toHaveLength(6);
     // Every internal hop carried the verified assistant identity, never browser claims.
     expect(fixture.requests.every(r => r.identity?.sub === assistantId && r.identity.role === "lab_assistant" && r.identity.lab_id === 7)).toBe(true);
   });
@@ -123,7 +129,7 @@ describe("Equipment failures and recovery across the boundary", () => {
     expect(failed.status).toBe(503);
     const body = await failed.text();
     expect(JSON.parse(body).code).toBe("handover_state_uncertain"); expect(body).not.toContain(secret);
-    expect(fixture.db.state.loans).toHaveLength(0); expect((await view()).pendingOperation).toBe(true);
+    expect(fixture.db.state.loans).toHaveLength(0); expect((await view()).pending).toMatchObject({ state: "planned", recoverableByYou: true });
     fixture.failEquipmentStatus = false;
     expect((await post(confirmBody())).status).toBe(200);
     expect(fixture.db.state.loans).toHaveLength(1);
@@ -152,5 +158,74 @@ describe("Equipment failures and recovery across the boundary", () => {
     await post(confirmBody());
     expect(fixture.requests.length).toBeGreaterThan(3);
     expect(fixture.requests.every(r => r.identity?.kind === "user" && r.identity.sub === assistant.id)).toBe(true);
+  });
+});
+
+describe("review fixes across the Web -> Loans -> Users/Equipment boundary", () => {
+  it("main item is a required explicit row for kits; its own condition and note are saved", async () => {
+    const missingMain = await post(confirmBody(checklist().slice(1)));
+    expect(missingMain.status).toBe(409); expect((await missingMain.json()).error).toBe("Record the condition of the main item as well as every component.");
+    const response = await post(confirmBody(checklist(row => row, { conditionStatus: "damaged", notes: "Case hinge cracked" })));
+    expect(response.status).toBe(200);
+    expect(fixture.db.state.records.find(r => r.kit_component_id === null)).toMatchObject({ condition_status: "damaged", notes: "Case hinge cracked" });
+  });
+
+  it("identity: an inactive borrower is shown as not verified and Loans refuses even a crafted submission", async () => {
+    fixture.borrowerActive = false;
+    const data = await view();
+    expect(data.borrower).toEqual({ name: borrowerName, identity: "not_verified" });
+    const response = await post(confirmBody());
+    expect(response.status).toBe(409); expect((await response.json()).code).toBe("borrower_unverified");
+    expect(fixture.history).toHaveLength(0); expect(fixture.db.state.loans).toHaveLength(0);
+  });
+
+  it("identity: Users unavailable -> 'unavailable' on the page and a retryable 503 from Loans, nothing changed", async () => {
+    fixture.usersDown = true;
+    expect((await view()).borrower.identity).toBe("unavailable");
+    const response = await post(confirmBody());
+    expect(response.status).toBe(503); expect((await response.json()).code).toBe("borrower_unavailable");
+    expect(fixture.status).toBe("reserved"); expect(fixture.db.state.reservation.handover_operation).toBeNull();
+  });
+
+  it("a browser-supplied borrower name or ID never substitutes for Users verification", async () => {
+    fixture.borrowerActive = false;
+    const response = await post({ ...confirmBody(), borrowerId: assistantId, borrowerName: "Trusted Name", identityVerified: true });
+    expect(response.status).toBe(409); expect(fixture.db.state.loans).toHaveLength(0);
+  });
+
+  it("a stale checklist (components changed after the page loaded) is refused before checkout", async () => {
+    const stale = confirmBody();
+    fixture.components = fixture.components.slice(0, 4);
+    const response = await post(stale);
+    expect(response.status).toBe(409); expect((await response.json()).error).toBe("The equipment's component list changed. Reload the checklist and check it again.");
+    expect(fixture.history).toHaveLength(0);
+  });
+
+  it("interrupted after checkout: page shows it, lab list shows it, Finish interrupted handover completes it", async () => {
+    fixture.usersDownAfterCheckout = true;
+    const failed = await post(confirmBody(checklist((row, i) => i === 0 ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : row)));
+    expect(failed.status).toBe(503); expect((await failed.json()).code).toBe("handover_incomplete");
+    expect(fixture.status).toBe("checked_out"); expect(fixture.db.state.loans).toHaveLength(0);
+    fixture.usersDown = false; fixture.usersDownAfterCheckout = false;
+    expect((await view()).pending).toMatchObject({ state: "applied", recoverableByYou: true });
+    const list = await (await LIST(new Request("http://web.test/api/handover"))).json();
+    expect(list).toEqual([expect.objectContaining({ reservationId, state: "applied" })]);
+    const recovered = await RECOVER(new Request("http://web.test/api/handover/" + reservationId + "/recover", { method: "POST" }), fixture.context());
+    expect(recovered.status).toBe(200); expect(await recovered.json()).toMatchObject({ reservationId, status: "checked_out" });
+    expect(fixture.db.state.records).toHaveLength(6);
+    expect(fixture.db.state.records.find(r => r.kit_component_id === kitComponents[0].id)).toMatchObject({ condition_status: "missing", notes: "Charger not in the case" });
+    expect(fixture.history).toHaveLength(1);
+  });
+
+  it.each(["student", "professor", "lab_manager"])("recovery and the interrupted list are lab-assistant only at the Web gateway (%s)", async role => {
+    fixture.asRole(role);
+    expect((await RECOVER(new Request("http://web.test/api/handover/" + reservationId + "/recover", { method: "POST" }), fixture.context())).status).toBe(403);
+    expect((await LIST(new Request("http://web.test/api/handover"))).status).toBe(403);
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  it("rejects a cross-origin recovery request", async () => {
+    const response = await RECOVER(new Request("http://web.test/api/handover/" + reservationId + "/recover", { method: "POST", headers: { Origin: "http://attacker.test" } }), fixture.context());
+    expect(response.status).toBe(403); expect(fixture.requests).toHaveLength(0);
   });
 });

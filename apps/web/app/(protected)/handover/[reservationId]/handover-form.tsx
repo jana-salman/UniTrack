@@ -15,17 +15,21 @@ interface HandoverFormProps {
   equipmentName: string;
   /** Active kit components from Equipment; empty for non-kit equipment. */
   components: { id: string; name: string; required: boolean }[];
+  /** Version of the component list shown; Loans rejects a stale checklist. */
+  checklistVersion: string;
   borrowerName: string | null;
   onComplete: (outcome: HandoverOutcome) => void;
 }
 
 const CONDITIONS = Object.keys(HANDOVER_CONDITION_LABELS) as ConditionStatus[];
 
-export default function HandoverForm({ reservationId, equipmentName, components, borrowerName, onComplete }: HandoverFormProps) {
-  // Rendered dynamically from Equipment's component list; never a fixed count.
-  const rows = components.length
-    ? components.map(component => ({ key: component.id, id: component.id as string | null, label: component.name, required: component.required }))
-    : [{ key: "main", id: null as string | null, label: equipmentName, required: true }];
+export default function HandoverForm({ reservationId, equipmentName, components, checklistVersion, borrowerName, onComplete }: HandoverFormProps) {
+  // The main item (kit case or non-kit item) always gets its OWN row and
+  // condition; kit components follow, rendered from Equipment's actual list.
+  const rows = [
+    { key: "main", id: null as string | null, label: components.length ? `${equipmentName} (main item)` : equipmentName, required: true },
+    ...components.map(component => ({ key: component.id, id: component.id as string | null, label: component.name, required: component.required })),
+  ];
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [conditions, setConditions] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -78,6 +82,7 @@ export default function HandoverForm({ reservationId, equipmentName, components,
     if (!studentConfirmed) return setError("The student must confirm the handover before it can be completed.");
     await send({
       studentConfirmed: true,
+      checklistVersion,
       conditions: rows.map(row => ({
         kitComponentId: row.id, checked: true,
         conditionStatus: conditions[row.key] as ConditionStatus,
@@ -90,7 +95,7 @@ export default function HandoverForm({ reservationId, equipmentName, components,
     <form onSubmit={handleSubmit} className="space-y-5">
       <fieldset disabled={submitting || retryPayload !== null} className="space-y-5">
         <legend className="text-xl font-semibold text-slate-950">
-          {components.length ? `Kit checklist (${components.length} components)` : "Equipment check"}
+          {components.length ? `Kit checklist (main item + ${components.length} components)` : "Equipment check"}
         </legend>
 
         {rows.map(row => (
@@ -103,7 +108,7 @@ export default function HandoverForm({ reservationId, equipmentName, components,
                 onChange={event => setChecked(current => ({ ...current, [row.key]: event.target.checked }))}
                 className="h-5 w-5"
               />
-              {row.label}{components.length > 0 && !row.required ? " (optional)" : ""}
+              {row.label}{row.id !== null && !row.required ? " (optional)" : ""}
             </label>
             <p className="text-sm text-slate-500">Tick after checking it, including when it is missing.</p>
 
