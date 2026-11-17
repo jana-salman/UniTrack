@@ -9,6 +9,9 @@
 --   unitrack_users_runtime     -> unitrack_users_service
 --   unitrack_equipment_runtime -> unitrack_equipment_service
 --   unitrack_loans_runtime     -> unitrack_loans_service
+--   unitrack_users_dev         -> unitrack_users_service
+--   unitrack_equipment_dev     -> unitrack_equipment_service
+--   unitrack_loans_dev         -> unitrack_loans_service
 
 WITH
 service_groups(role_name) AS (
@@ -21,7 +24,10 @@ runtime_roles(role_name, group_name) AS (
   VALUES
     ('unitrack_users_runtime', 'unitrack_users_service'),
     ('unitrack_equipment_runtime', 'unitrack_equipment_service'),
-    ('unitrack_loans_runtime', 'unitrack_loans_service')
+    ('unitrack_loans_runtime', 'unitrack_loans_service'),
+    ('unitrack_users_dev', 'unitrack_users_service'),
+    ('unitrack_equipment_dev', 'unitrack_equipment_service'),
+    ('unitrack_loans_dev', 'unitrack_loans_service')
 ),
 expected_group_memberships(
   member_name,
@@ -37,6 +43,9 @@ expected_group_memberships(
     ('unitrack_users_runtime', 'unitrack_users_service', 'postgres', false, true, true),
     ('unitrack_equipment_runtime', 'unitrack_equipment_service', 'postgres', false, true, true),
     ('unitrack_loans_runtime', 'unitrack_loans_service', 'postgres', false, true, true),
+    ('unitrack_users_dev', 'unitrack_users_service', 'postgres', false, true, true),
+    ('unitrack_equipment_dev', 'unitrack_equipment_service', 'postgres', false, true, true),
+    ('unitrack_loans_dev', 'unitrack_loans_service', 'postgres', false, true, true),
     -- Supabase grants its non-superuser postgres role administrative control
     -- of roles created through that account. These memberships confer neither
     -- inherited privileges nor SET ROLE capability.
@@ -170,8 +179,8 @@ checks AS (
         AND NOT rolcreatedb
         AND NOT rolcreaterole
         AND NOT rolreplication
-        AND NOT rolbypassrls) = 3,
-    'Three safe LOGIN/INHERIT/NOBYPASSRLS runtime roles exist'
+        AND NOT rolbypassrls) = 6,
+    'Six safe LOGIN/INHERIT/NOBYPASSRLS production and development runtime roles exist'
 
   UNION ALL
   SELECT

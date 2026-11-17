@@ -37,5 +37,8 @@ describe("roles and navigation", () => {
     expect(markup.includes('href="/manager/users"')).toBe(
       role === "lab_manager",
     );
+    expect(markup.includes('href="/equipment/lookup"')).toBe(
+    role === "lab_assistant" || role === "lab_manager",
+    );
   });
 });
