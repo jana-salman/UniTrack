@@ -52,6 +52,19 @@ and Equipment transaction function against real PostgreSQL. Migration 006 also
 checks password-free group roles, least-privilege grants, RLS policies, owned
 table operations, sequence access, and denied cross-service table reads.
 
+After 006 the runner applies the C430PRJCT-40 (S2-09 handover) migration twice
+to prove it is idempotent, runs `verify_C430PRJCT-40.sql`, and runs
+`services/loans/tests/postgres-handover.integration.test.ts` with Loans and
+Equipment connected as their restricted 006 group roles. That test creates its
+own synthetic lab, kits, components and reservations.
+
+`handover-manual.ps1` (with `manual_service_logins.sql` and
+`handover_manual_fixture.sql`) prepares a separate disposable database for
+clicking through `/handover/[reservationId]`, with each service connecting as its
+own restricted 006 login; see
+[docs/handover-s2-09.md](../../docs/handover-s2-09.md). It is never run by the
+runner and must never be run against Supabase.
+
 If a run is interrupted, remove only this explicitly named local Compose
 project:
 

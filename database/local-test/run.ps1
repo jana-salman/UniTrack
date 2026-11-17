@@ -57,6 +57,11 @@ try {
   Invoke-PsqlFile '/workspace/database/migrations/006_service_database_isolation.sql' 'Migration 006'
   Invoke-PsqlFile '/workspace/database/local-test/verify_006.sql' 'Migration 006 verification'
 
+  Write-Host 'Applying (twice, to prove idempotency) and verifying C430PRJCT-40 handover migration locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/C430PRJCT-40_S2-09_handover_confirmation.sql' 'Migration C430PRJCT-40'
+  Invoke-PsqlFile '/workspace/database/migrations/C430PRJCT-40_S2-09_handover_confirmation.sql' 'Migration C430PRJCT-40 re-run'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_C430PRJCT-40.sql' 'Migration C430PRJCT-40 verification'
+
   Push-Location $repositoryRoot
   try {
     Write-Host 'Running the existing static migration compatibility test...'
@@ -69,6 +74,10 @@ try {
       Write-Host 'Running real PostgreSQL Equipment/Loans integration tests...'
       npm test --workspace=@unitrack/loans -- --run tests/postgres-migrations.integration.test.ts
       Assert-LastExitCode 'PostgreSQL microservice integration test'
+
+      Write-Host 'Running real PostgreSQL handover (C430PRJCT-40) integration tests as restricted service roles...'
+      npm test --workspace=@unitrack/loans -- --run tests/postgres-handover.integration.test.ts
+      Assert-LastExitCode 'PostgreSQL handover integration test'
     }
     finally {
       if ($null -eq $previousTestDatabaseUrl) {
@@ -83,7 +92,7 @@ try {
     Pop-Location
   }
 
-  Write-Host 'PASS: migrations 003-006 and the focused microservice integration checks passed locally.'
+  Write-Host 'PASS: migrations 003-006, C430PRJCT-40 and the focused microservice integration checks passed locally.'
 }
 finally {
   if ($containerStarted) {

@@ -12,6 +12,8 @@ export function isLoanDueDate(value: unknown): value is LoanDueDate {
     && Number.isFinite(Date.parse(dueDate.dueDate));
 }
 
+import { HANDOVER_ERROR_CODES, HANDOVER_ERROR_MESSAGES } from "./handover.js";
+
 // Approved wire vocabulary only. No persistence or business implementation.
 export const LOANS_ERROR_CONTRACT = {
   messages: [
@@ -30,6 +32,7 @@ export const LOANS_ERROR_CONTRACT = {
     "Loans requires a direct or session-pooled database connection and explicit session-affinity acknowledgement.",
     "Loans is unavailable. Verify the return state before retrying.",
     "Invalid item IDs. Maximum batch size is 100.",
+    ...HANDOVER_ERROR_MESSAGES,
   ],
-  codes: ["unauthenticated", "forbidden", "invalid_loan", "loan_not_found", "invalid_return", "equipment_missing", "return_conflict", "equipment_rejected", "return_state_uncertain", "return_rolled_back", "loans_configuration", "loans_unavailable", "invalid_items"],
+  codes: ["unauthenticated", "forbidden", "invalid_loan", "loan_not_found", "invalid_return", "equipment_missing", "return_conflict", "equipment_rejected", "return_state_uncertain", "return_rolled_back", "loans_configuration", "loans_unavailable", "invalid_items", ...HANDOVER_ERROR_CODES],
 } as const;
