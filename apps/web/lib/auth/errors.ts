@@ -3,8 +3,9 @@ export class AuthorizationError extends Error {
     public readonly status: 401 | 403 | 503,
     public readonly code: string,
     message: string,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "AuthorizationError";
   }
 }

@@ -205,6 +205,20 @@ export default function ReturnDetails({
           </ul>
         )}
       </div>
+      {loan.returned_at && <section aria-labelledby="return-history-heading" className="rounded-xl border border-slate-200 bg-white p-5">
+        <h2 id="return-history-heading" className="text-xl font-semibold text-slate-950">Return history</h2>
+        {state.data.returnHistory ? <>
+          <p>Returned: <time dateTime={state.data.returnHistory.returnedAt}>{formatDate(state.data.returnHistory.returnedAt)}</time></p>
+          <p className="font-semibold">{state.data.returnHistory.isLate ? "Late return" : "On-time return"}</p>
+          {!state.data.returnHistory.conditions.length && <p>Return condition records are unavailable.</p>}
+          <ul className="mt-4 space-y-3">{state.data.returnHistory.conditions.map(record => <li key={record.id} className="rounded-lg border border-slate-200 p-3">
+            <p className="font-semibold">{record.kitComponentId === null ? equipment.name : componentNames[record.kitComponentId] ?? "Component label unavailable"}</p>
+            <p>{record.conditionStatus === "damaged" ? "Damaged" : conditionLabels[record.conditionStatus]}</p>
+            {record.notes && <p className="whitespace-pre-wrap">{record.notes}</p>}
+            <p className="text-sm">Recorded: <time dateTime={record.recordedAt}>{formatDate(record.recordedAt)}</time></p>
+          </li>)}</ul>
+        </> : <p role="status">Return history is unavailable. Please try again later.</p>}
+      </section>}
       {loan.returned_at === null && pickupConditions.length > 0 && (
         <ReturnActions
           key={loan.id}

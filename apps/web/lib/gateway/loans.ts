@@ -38,7 +38,7 @@ export async function forwardReturn(request: Request, loanId: string): Promise<R
       if (!isReturnOutcome(outcome) || outcome.loanId.toLowerCase() !== loanId.toLowerCase()) {
         return invalidServiceResponse(identity.rid);
       }
-      return Response.json(outcome, {
+      return Response.json({ loanId: outcome.loanId, returnedAt: outcome.returnedAt, status: outcome.status, isLate: outcome.isLate }, {
         status: response.status,
         headers: { "Cache-Control": "private, no-store", "X-Request-Id": identity.rid },
       });
@@ -55,8 +55,8 @@ export async function forwardReturn(request: Request, loanId: string): Promise<R
       return invalidServiceResponse(identity.rid);
     }
     const details = detailsPayload;
-    const callEquipment = createServiceCaller({ baseUrl: process.env.EQUIPMENT_SERVICE_URL ?? "", secret: process.env.INTERNAL_JWT_SECRET ?? "", errorContract: EQUIPMENT_ERROR_CONTRACT });
-    const callUsers = createServiceCaller({ baseUrl: process.env.USERS_SERVICE_URL ?? "", secret: process.env.INTERNAL_JWT_SECRET ?? "", errorContract: USERS_ERROR_CONTRACT });
+    const callEquipment = labelCaller({ baseUrl: process.env.EQUIPMENT_SERVICE_URL ?? "", secret: process.env.INTERNAL_JWT_SECRET ?? "", errorContract: EQUIPMENT_ERROR_CONTRACT });
+    const callUsers = labelCaller({ baseUrl: process.env.USERS_SERVICE_URL ?? "", secret: process.env.INTERNAL_JWT_SECRET ?? "", errorContract: USERS_ERROR_CONTRACT });
     const [item, components, borrower] = await Promise.all([
       callEquipment("/items/" + encodeURIComponent(details.loan.item_id), identity),
       callEquipment("/items/" + encodeURIComponent(details.loan.item_id) + "/components", identity),
@@ -81,7 +81,18 @@ export async function forwardReturn(request: Request, loanId: string): Promise<R
       : null;
     const partial = itemData === null || componentData === null || borrowerData === null;
     return Response.json({
-      ...details,
+      // Shape validation permits compatible future fields, but browser responses
+      // must never inherit unknown service fields or internal operation metadata.
+      loan: {
+        id: details.loan.id, item_id: details.loan.item_id, borrower_id: details.loan.borrower_id,
+        reservation_id: details.loan.reservation_id, lab_id: details.loan.lab_id,
+        borrowed_at: details.loan.borrowed_at, due_date: details.loan.due_date, returned_at: details.loan.returned_at,
+      },
+      pickupConditions: details.pickupConditions.map(row => ({ id: row.id, kit_component_id: row.kit_component_id, condition_status: row.condition_status, notes: row.notes })),
+      ...(details.returnHistory ? { returnHistory: {
+        returnedAt: details.returnHistory.returnedAt, isLate: details.returnHistory.isLate,
+        conditions: details.returnHistory.conditions.map(row => ({ id: row.id, kitComponentId: row.kitComponentId, conditionStatus: row.conditionStatus, notes: row.notes, recordedAt: row.recordedAt })),
+      } } : {}),
       equipment: {
         name: itemData?.name ?? "Equipment name unavailable",
         components: (componentData ?? []).map(entry => ({ id: entry.id, name: entry.component_name })),
@@ -93,6 +104,10 @@ export async function forwardReturn(request: Request, loanId: string): Promise<R
     if (error instanceof AuthorizationError) return Response.json({ error: error.message, code: error.code }, { status: error.status });
     return Response.json({ error: "Loans is not configured or unavailable.", code: "loans_unavailable" }, { status: 503 });
   }
+}
+function labelCaller(config: Parameters<typeof createServiceCaller>[0]): ReturnType<typeof createServiceCaller> {
+  try { return createServiceCaller(config); }
+  catch { return async () => Response.json({ error: "Labels are unavailable." }, { status: 503 }); }
 }
 function privateResponse(response: Response): Response {
   response.headers.set("Cache-Control", "private, no-store");

@@ -134,7 +134,8 @@ export const EQUIPMENT_ERROR_CONTRACT = {
     "Invalid idempotency key",
     "Invalid item IDs. Maximum batch size is 100.",
     "Sign in is required.",
-    "You do not have permission to perform this action."
+    "You do not have permission to perform this action.",
+    "Enter a valid equipment identifier (maximum 100 characters)."
   ],
   "codes": [
     "equipment_not_configured", "equipment_schema_not_ready", "equipment_database_access", "equipment_database_unavailable",

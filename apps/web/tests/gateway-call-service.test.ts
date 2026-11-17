@@ -2,11 +2,11 @@ import { createServer } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { verifyInternalToken } from "@unitrack/internal-auth";
 vi.mock("server-only", () => ({}));
-import { createServiceCaller, SERVICE_TIMEOUT_MS } from "@/lib/gateway/call-service";
+import { createServiceCaller, DEVELOPMENT_SERVICE_TIMEOUT_MS, SERVICE_TIMEOUT_MS } from "@/lib/gateway/call-service";
 const secret = "public-dummy-gateway-test-secret-not-for-deployment";
 const identity = { kind: "user", sub: "trusted-profile", role: "lab_assistant", lab_id: 7, rid: "trusted-request-1" } as const;
 const caller = () => createServiceCaller({ baseUrl: "https://equipment.test", secret });
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe("gateway service caller", () => {
   it("signs trusted identity, forwards tracing and preserves success JSON", async () => {
     const fetcher = vi.fn().mockResolvedValue(Response.json({ result: "ok" }, { status: 201 })); vi.stubGlobal("fetch", fetcher);
@@ -79,6 +79,19 @@ describe("gateway service caller", () => {
     await vi.advanceTimersByTimeAsync(1);
     const response = await pending;
     expect(response.status).toBe(504); expect(await response.json()).toEqual({ error: "Service request timed out.", code: "service_timeout" });
+    expect(fetcher).toHaveBeenCalledTimes(1); expect(vi.getTimerCount()).toBe(0);
+  });
+  it("allows a development route cold compile without changing the production timeout", async () => {
+    vi.useFakeTimers(); vi.stubEnv("NODE_ENV", "development"); let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    const fetcher = vi.fn().mockImplementation((_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(new Error("private timeout detail"))); started();
+    })); vi.stubGlobal("fetch", fetcher);
+    const pending = caller()("/items", identity);
+    await ready; await vi.advanceTimersByTimeAsync(SERVICE_TIMEOUT_MS);
+    expect(fetcher.mock.calls[0][1].signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(DEVELOPMENT_SERVICE_TIMEOUT_MS - SERVICE_TIMEOUT_MS);
+    expect((await pending).status).toBe(504);
     expect(fetcher).toHaveBeenCalledTimes(1); expect(vi.getTimerCount()).toBe(0);
   });
   it("keeps the timeout active while reading the body", async () => {

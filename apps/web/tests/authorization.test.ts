@@ -58,6 +58,17 @@ describe("role authorization", () => {
     });
   });
 
+  it("preserves the sanitized Users failure as the authorization cause", async () => {
+    const cause = new Error("Users service returned HTTP 504.");
+    mocks.findProfileById.mockRejectedValue(cause);
+
+    await expect(requireRole(["lab_manager"])).rejects.toMatchObject({
+      status: 503,
+      code: "users_unavailable",
+      cause,
+    });
+  });
+
   it("uses an updated role on the next permission check", async () => {
     let currentProfile = student;
     mocks.findProfileById.mockImplementation(async () => currentProfile);

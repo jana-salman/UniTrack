@@ -14,12 +14,21 @@ export async function findProfileById(userId: string): Promise<Profile | null> {
   try { const body = await response.json(); if (body?.error === "User profile not found.") return null; } catch { /* Treat non-contract 404s as unavailable, not unknown users. */ }
   throw new UsersServiceUnavailableError();
  }
- if (!response.ok) throw new UsersServiceUnavailableError();
+ if (!response.ok) {
+  throw new UsersServiceUnavailableError({
+   cause: new Error(`Users service returned HTTP ${response.status}.`),
+  });
+ }
  try {
   const result = profile(await response.json());
   if (result.id.toLowerCase() !== userId.toLowerCase()) throw new UsersServiceUnavailableError();
   return result;
- } catch { throw new UsersServiceUnavailableError(); }
+ } catch (error) {
+  if (error instanceof UsersServiceUnavailableError) throw error;
+  throw new UsersServiceUnavailableError({
+   cause: new Error("Users response could not be parsed."),
+  });
+ }
 }
 export async function listProfilesByLab(manager: Profile): Promise<Profile[]> {
  const response = await callUsers("/profiles?labId=" + manager.lab_id, { kind: "user", sub: manager.id, role: manager.role, lab_id: manager.lab_id, rid: getRequestId() });
@@ -30,5 +39,10 @@ export async function listProfilesByLab(manager: Profile): Promise<Profile[]> {
   const rows = data.map(profile);
   if (rows.some(row => row.lab_id !== manager.lab_id)) throw new UsersServiceUnavailableError();
   return rows;
- } catch { throw new UsersServiceUnavailableError(); }
+ } catch (error) {
+  if (error instanceof UsersServiceUnavailableError) throw error;
+  throw new UsersServiceUnavailableError({
+   cause: new Error("Users response could not be parsed."),
+  });
+ }
 }

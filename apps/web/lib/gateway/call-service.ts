@@ -3,6 +3,7 @@ import { signInternalToken } from "@unitrack/internal-auth";
 import type { ApiError, InternalIdentity } from "@unitrack/contracts";
 
 export const SERVICE_TIMEOUT_MS = 5000;
+export const DEVELOPMENT_SERVICE_TIMEOUT_MS = 30000;
 interface ServiceConfig { baseUrl: string; secret: string; errorContract?: { messages: readonly string[]; codes: readonly string[] } }
 interface ServiceRequest { method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD"; body?: unknown; idempotencyKey?: string }
 function failure(status: number, error: string, code: string, rid?: string) {
@@ -38,7 +39,13 @@ export function createServiceCaller(config: ServiceConfig) {
     try { token = await signInternalToken(identity, secret); }
     catch { return failure(500, "Service authentication is not configured correctly.", "service_configuration"); }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SERVICE_TIMEOUT_MS);
+    // A Next.js development server may need to compile a service route on its
+    // first request. Keep the production fail-fast limit while allowing that
+    // supported local-development cold start to finish.
+    const timeoutMs = process.env.NODE_ENV === "development"
+      ? DEVELOPMENT_SERVICE_TIMEOUT_MS
+      : SERVICE_TIMEOUT_MS;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(url, {
         method: request.method ?? "GET",
