@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, type FormEvent } from "react";
@@ -11,6 +10,10 @@ type EquipmentItem = {
   serial_number: string | null;
   status: string;
   condition: string;
+};
+
+type EquipmentLookupClientProps = {
+  canReplaceQrLabel: boolean;
 };
 
 function isEquipmentItem(data: unknown): data is EquipmentItem {
@@ -31,7 +34,9 @@ function isEquipmentItem(data: unknown): data is EquipmentItem {
   );
 }
 
-export default function EquipmentLookupClient() {
+export default function EquipmentLookupClient({
+  canReplaceQrLabel,
+}: EquipmentLookupClientProps) {
   const [identifier, setIdentifier] = useState("");
   const [item, setItem] = useState<EquipmentItem | null>(null);
   const [error, setError] = useState("");
@@ -152,22 +157,24 @@ export default function EquipmentLookupClient() {
             </p>
           </div>
 
-          <div className="space-y-3">
-            <h3 className="font-semibold text-slate-900">
-              Replacement QR Label
-            </h3>
+          {canReplaceQrLabel && (
+            <div className="space-y-3">
+              <h3 className="font-semibold text-slate-900">
+                Replacement QR Label
+              </h3>
 
-            <p className="text-sm text-slate-600">
-              Print a replacement label using this equipment's
-              existing ID.
-            </p>
+              <p className="text-sm text-slate-600">
+                Print a replacement label using this equipment&apos;s
+                existing ID.
+              </p>
 
-            <EquipmentQrLabel
-              itemId={item.id}
-              name={item.name}
-              assetCode={item.asset_code}
-            />
-          </div>
+              <EquipmentQrLabel
+                itemId={item.id}
+                name={item.name}
+                assetCode={item.asset_code}
+              />
+            </div>
+          )}
         </div>
       )}
     </section>

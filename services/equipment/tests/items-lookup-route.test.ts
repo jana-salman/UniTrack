@@ -1,4 +1,3 @@
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GET } from "@/app/items/lookup/route";
@@ -70,12 +69,29 @@ describe("GET /items/lookup", () => {
     expect(findItemByIdentifier).toHaveBeenCalledWith("SN-12345", 1);
   });
 
-  it("allows lab managers and lab assistants", async () => {
-    await GET(makeRequest("EQ-001"));
+  it.each([
+    "lab_assistant",
+    "lab_manager",
+    "professor",
+  ] as const)("allows equipment lookup for %s", async (role) => {
+    vi.mocked(requireRole).mockResolvedValue({
+      id: "test-user",
+      role,
+      lab_id: 1,
+    });
+
+    const response = await GET(makeRequest("EQ-001"));
+
+    expect(response.status).toBe(200);
 
     expect(requireRole).toHaveBeenCalledWith(
       expect.any(Request),
-      ["lab_assistant", "lab_manager"]
+      ["lab_assistant", "lab_manager", "professor"]
+    );
+
+    expect(findItemByIdentifier).toHaveBeenCalledWith(
+      "EQ-001",
+      1
     );
   });
 
