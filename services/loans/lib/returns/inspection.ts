@@ -3,6 +3,8 @@ import type {
   ReturnConditionInput,
 } from "./types";
 
+export const NEW_DAMAGE_NOTE = "New or additional damage reported at return.";
+
 export function requiresInspection(
   pickupConditions: PickupCondition[],
   returnConditions: ReturnConditionInput[],

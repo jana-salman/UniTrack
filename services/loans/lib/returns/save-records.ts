@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { PoolClient } from "pg";
+import { NEW_DAMAGE_NOTE } from "./inspection";
 
 import type {
   ConfirmReturnInput,
@@ -31,7 +32,7 @@ export async function saveReturnRecordsInTransaction(
   for (const record of input.conditions) {
     const notes = [
       record.newDamage
-        ? "New or additional damage reported at return."
+        ? NEW_DAMAGE_NOTE
         : null,
       record.notes?.trim() || null,
     ]
