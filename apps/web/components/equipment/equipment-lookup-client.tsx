@@ -158,8 +158,8 @@ export default function EquipmentLookupClient() {
             </h3>
 
             <p className="text-sm text-slate-600">
-              Print a replacement label using this equipment's
-              existing ID.
+            Print a replacement label using this equipment&apos;s
+            existing ID.
             </p>
 
             <EquipmentQrLabel
