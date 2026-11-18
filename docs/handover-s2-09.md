@@ -195,9 +195,15 @@ by the app. Additive and idempotent:
 - Two RLS policies (`c430prjct_40_loans_handover_insert` requiring
   `student_confirmed_at`, `university_id_verified_at` and
   `university_id_verified_by` NOT NULL and `returned_at IS NULL`, and
-  `c430prjct_40_reservations_handover_update`). Names avoid 006's
-  `unitrack_*_service_*` pattern and grants are column-level, so
-  `postflight_006_read_only.sql` still passes.
+  `c430prjct_40_reservations_handover_update`). These policies are verified
+  explicitly, not hidden from 006's checks: `verify_C430PRJCT-40.sql` asserts
+  each one by name, table, command and role. It also asserts that 006's
+  18-grant / 18-policy matrix is unchanged. The restricted-role PostgreSQL tests
+  exercise the insert rule (a loan without confirmation or ID-check evidence →
+  42501). `postflight_006_read_only.sql` counts only 006's own policies, so it
+  does not cover these additions; their verification lives in this card's
+  script. The SQL file's comment about names reflects that scope, not an intent
+  to bypass review.
 - If the roles do not exist yet (006 not applied), only the columns are added
   and a NOTICE is printed. 006's `REVOKE ALL` also removes column grants, so
   **re-run this file after applying 006**.
@@ -341,9 +347,13 @@ loans), with RLS on and exactly 18 `unitrack_*_service_*` policies checked by
   run as the table owner, it would read `loans` outside RLS and the service
   grants.
 - S2-01 needs its own additive, column-level grants on `reservations` (e.g.
-  `INSERT`, `UPDATE (status)`), in the style of this card's migration. Any new
-  policies must not match `unitrack\_%\_service\_%`, so 006's postflight still
-  counts 18. `SELECT … FOR UPDATE` needs UPDATE on at least one column; Loans
+  `INSERT`, `UPDATE (status)`), in the style of this card's migration. Every
+  new RLS policy must be **explicitly verified** by S2-01's own verification
+  script (exact name, table, command, role, and its USING / WITH CHECK
+  expressions), with restricted-role tests showing what it allows and refuses.
+  It must also re-assert that 006's reviewed grant/policy matrix is unchanged.
+  Policy naming is not a substitute for that verification. `SELECT … FOR
+  UPDATE` needs UPDATE on at least one column; Loans
   already has `UPDATE (handover_operation)` from this card's migration and will
   have S2-01's grant.
 - If JS/LJ instead put reservation writes under **another role**, that role must
@@ -365,7 +375,11 @@ loans), with RLS on and exactly 18 `unitrack_*_service_*` policies checked by
    loan?
 3. Confirm the assumption that S2-01 reservation writes run in the Loans service.
 
-**NH (this card)** — no service change needed. After S2-02 merges:
+**NH (this card)** — **provisionally** no handover service change is expected.
+This is an analysis, not a tested result: it holds only until S2-02 and the
+S2-01 protection are tested together with handover on a disposable database
+(concurrent handover vs. status change, both commit orders). If that combined
+testing shows a gap, the handover service may need changes. After S2-02 merges:
 resolve the one-line `database/local-test/run.ps1` conflict (both add steps after
 006; order is independent), and adapt this card's PostgreSQL fixtures that
 insert overlapping confirmed reservations (the two-eligible-reservations test
