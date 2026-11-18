@@ -15,9 +15,7 @@ student of the lab, and a successful Equipment checkout.
 | Assistant physically verifies the student's **university ID**; no student login or ID upload | Separate **University ID check (lab assistant)** checkbox, independent of the student's confirmation. Loans requires `universityIdVerified: true` (400 `id_verification_required` before any database, Users or Equipment access) **and** `studentConfirmed: true`. Evidence stored with minimal schema: `loans.university_id_verified_at` + `loans.university_id_verified_by` (the assistant). No ID number, upload, photo or student sign-in; unknown body fields are ignored and never stored. | Service, route, gateway and UI tests (ID tick missing, ID tick without confirmation, confirmation without ID tick, extra ID-number/photo fields not stored, no text/file inputs); migration static + `verify_C430PRJCT-40.sql` + PostgreSQL RLS tests. |
 | Durable, retryable recovery is sufficient; no worker; no cross-assistant expansion | Unchanged request-driven Saga and existing recovery (kept, not removed). The durable plan now also stores the ID-check evidence (`idVerifiedBy` + `universityIdVerifiedAt`) and the confirmed dates, so recovery reuses the ORIGINAL verification and checklist and never asks again. No background worker added; who may recover is unchanged. | Recovery by the starter and (for `applied`) another assistant keeps `university_id_verified_by` = original assistant (service + PostgreSQL); corrupted/missing evidence in a stored plan → `handover_state_uncertain`. |
 | UI clearly shows uncertain outcomes and prevents fresh submissions while unresolved | Outcomes are classified: **completed** (200), **failed** (4xx, `borrower_unavailable`, `handover_rolled_back`: nothing handed over, form stays editable) and **uncertain** (other 5xx such as `handover_state_uncertain`/`handover_incomplete`, network errors, unverifiable responses). After any unsuccessful attempt the page re-reads Loans: an unresolved operation replaces the form with **Handover not finished — outcome uncertain**, keeps the error visible, states that a new handover cannot start, and offers only **Finish interrupted handover** (the same operation). If no operation was saved (e.g. lost connection), the form is locked under **Outcome not confirmed** and only **Retry the same handover** (identical information, same key) is possible. Loans independently refuses a different submission while an operation is unfinished. | UI tests (uncertain with saved plan → only recovery, saved checklist used; lost connection → locked form, only identical retry; definite failure → no uncertain notice); service test (fresh submission and other assistant refused while `planned`; same information resumes the same key). |
-| Confirmed reservation dates cannot be edited | Handover never writes reservation dates (Loans has no grant to). The plan stores the confirmed `start_at`/`end_at`; the final loan transaction refuses with 409 "The reservation changed during handover" (guarded undo, no loan) if they differ, so the saved due date is always the confirmed `end_at`. Preventing the edit itself belongs to the reservation owner (see LJ coordination). | Service tests (start or end edited after checkout → undo, no loan; retry plans from the current reservation); real PostgreSQL (end date edited by another connection after checkout). |
-
-## Product Owner decisions (confirmed by ZZ)
+| Confirmed reservation dates cannot be edited | Handover never writes reservation dates (Loans has no grant to). The plan stores the confirmed `start_at`/`end_at`; the final loan transaction refuses with 409 "The reservation changed during handover" (guarded undo, no loan) if they differ, so the saved due date is always the confirmed `end_at`. LJ confirmed (2026-11-19) that rescheduling = cancel + new reservation and that handed-over reservations cannot be rescheduled — a **stated requirement, not yet enforced** in any code or database (see "Reservation rules"). | Service tests (start or end edited after checkout → undo, no loan; retry plans from the current reservation); real PostgreSQL (end date edited by another connection after checkout). |
 
 ## Product Owner decisions (confirmed by ZZ)
 
@@ -223,40 +221,168 @@ Shared Supabase was not touched. Verified on disposable PostgreSQL via
 `verify_C430PRJCT-40.sql` and `services/loans/tests/postgres-handover.integration.test.ts`
 as the restricted service roles).
 
-## Reservation rules, `main`, and remaining cross-service races
+## Reservation rules, `main`, S2-02, and remaining cross-service races
 
-What `main` (merged into this branch at `3bf6f20`) implements for reservations:
-**no reservation writer at all** (no create, confirm, cancel or date-edit route in
-any service), **no overlap constraint** (`database/data-model.md`: "Preventing
-overlapping confirmed reservations will be implemented in Sprint 2"), no
-reservation lock, and no rule that confirmed dates cannot change (`reservations`
-has only `CHECK (end_at > start_at)`). No service role has INSERT/UPDATE on
-`reservations` except this card's `UPDATE (handover_operation)`.
+Inspected 2026-11-19 (read-only; nothing merged, no teammate file changed):
+`origin/main` at `bf0fd3c` (PR #25, SC scan/pickup match — not yet merged into
+this branch; a dry-run merge is clean) and LJ's
+`origin/feature/S2-02-no-double-booking` at `d90cf11` (awaiting review; its
+migration is **not** applied to shared Supabase).
 
-What this card enforces (all SC rules and duplicate-checkout protection kept):
-per-reservation session lock; per-item transaction lock
-`loans:handover:item:<item_id>`; SC eligibility on locked rows at plan time and
-in the final loan transaction at server time; Equipment `expectedStatus` +
-operation ownership under its row lock; `loans_one_active_per_item` and unique
-`loans.reservation_id`; the reservation's borrower, item, lab and confirmed
-dates re-read in the final transaction.
+### Stated by LJ vs actually enforced
 
-Remaining races (honest limits; no distributed transaction exists):
+| LJ statement (2026-11-19) | Enforced where today |
+| --- | --- |
+| 1. Confirming a reservation does not change the equipment's physical status; Available equipment can be handed over if eligible | Consistent with PO decision A2 and with this card (accepts `available` or `reserved`). No reservation writer exists, so nothing could change it anyway. SC's pickup gateway on `main` also allows only `available`/`reserved`. |
+| 2. No overlapping confirmed reservations (PostgreSQL exclusion constraint); consecutive allowed | **Only on LJ's unmerged branch**: `reservations_no_overlapping_confirmed EXCLUDE USING gist (item_id WITH =, tstzrange(start_at, end_at, '[)') WITH &&) WHERE (status = 'confirmed')` + `btree_gist`. Not on `main`, not on shared Supabase. Covers only rows whose status is `confirmed`. |
+| 3. Confirmed dates must not be edited; reschedule = cancel + new; handed-over reservations cannot be rescheduled (the proposal below also covers item, borrower and lab) | **Not enforced anywhere** (no trigger, no API — no reservation create/confirm/cancel/edit route exists on `main` or on LJ's branch). LJ: a business rule for now, to be enforced in S2-01 (not started). This card only detects a change *during* its own handover (final re-check → undo). |
+| 4. S2-02 does not implement locking coordinated with handover | Confirmed: LJ's branch adds no lock, trigger or check that references loans or `handover_operation`. |
+| 5. LJ's code awaits review; migration not applied to shared Supabase | Confirmed from the branch (migration header: "never run against the shared database without approval"). |
 
-1. **Reservation writers are not serialized with handover.** A reservation
-   confirmed, created or re-dated by another writer *after* the final
-   transaction's eligibility count and *before* its COMMIT is not seen by it. The
-   final transaction holds `FOR UPDATE` on THIS reservation (so cancelling or
-   editing this reservation waits), but a different reservation for the same
-   item is only blocked if its writer takes the same per-item lock or a database
-   overlap rule exists. Today no such writer exists on `main`.
-2. **Confirmed dates** are protected by handover only for the duration of a
-   handover (final re-check). Preventing edits of confirmed dates must be done by
-   the reservation owner (trigger or API rule).
-3. **Users and Equipment checks are point-in-time HTTP reads.** A borrower
+What this card enforces (unchanged): per-reservation session lock; per-item
+transaction lock `loans:handover:item:<item_id>`; SC eligibility on locked rows at
+plan time and in the final loan transaction at server time; Equipment
+`expectedStatus` + operation ownership under its row lock;
+`loans_one_active_per_item` and unique `loans.reservation_id`; the reservation's
+borrower, item, lab and confirmed dates re-read (`FOR UPDATE`) in the final
+transaction. Handover never changes reservation status: a handed-over reservation
+stays `confirmed` with a loan.
+
+### Pickup lookup (no duplicate)
+
+`main` already has SC's lookup: Loans `GET /reservations/pickup?itemId=` (lab
+assistant, own lab; `services/loans/lib/reservations/pickup-query.ts`) behind Web
+`GET /api/reservations/pickup`. Its rules match this card's: `confirmed`,
+`start_at <= now < end_at`, no active loan, exactly one eligible reservation
+(`multipleEligibleReservations` blocks). The scan page links to
+`/handover/${reservation.id}` — the same route as this card — but that button is
+**disabled on `main` "until S2-09 is integrated"**. This card adds no lookup;
+re-enabling the link is SC's change after this PR merges. The pickup lookup is a
+point-in-time read; the handover service re-checks everything on locked rows.
+
+### What the exclusion constraint does and does not cover
+
+With S2-02 applied and the current half-open rule, two `confirmed` reservations
+for one item can never both contain `now`, from any writer, including writers
+concurrent with a handover (the constraint check waits for the other
+transaction). That closes the old race "another reservation becomes eligible
+between the final eligibility count and COMMIT", and makes the earlier ask that
+reservation writers take `loans:handover:item:<id>` unnecessary **for creating or
+confirming**. Handover still keeps its own locks and the multiple-eligible check
+(defence in depth; see the unresolved boundary question below).
+
+It does **not** coordinate the reservation being handed over, because the
+constraint only constrains rows while `status = 'confirmed'`:
+
+### Remaining gap — cancel/re-date of a reservation with a handover
+
+No writer is prevented from cancelling, un-confirming or re-dating a reservation
+that is mid-handover or already handed over:
+
+- **During a handover** (plan `planned`/`applied`): the final transaction sees
+  the change and undoes the checkout (safe, tested), but a student standing at
+  the counter loses the handover, and an `applied` plan whose starter is absent
+  stays for staff.
+- **After a handover** (loan exists, item `checked_out`): the reservation can be
+  set to `cancelled`/`pending` or re-dated. It then leaves the exclusion
+  constraint, so a **new overlapping confirmed reservation** can be created for
+  an item that is physically out on loan; and the reservation's dates no longer
+  match the loan's `due_date`. This violates LJ's rule 3 and is not detected by
+  anything.
+
+### Proposed coordination (PROPOSAL — untested, not implemented, awaiting JS/LJ agreement)
+
+LJ confirmed (2026-11-19): **S2-01 has not started; LJ owns reservation-side
+protection; confirmed-date immutability is currently a business rule only, to
+be enforced in S2-01.** Nothing below exists in code or in any migration.
+
+How the two mechanisms would split the work:
+
+| Mechanism | Protects | Owner |
+| --- | --- | --- |
+| S2-02 exclusion constraint | Two `confirmed` reservations for one item never overlap, from any writer or role, including writers concurrent with a handover (constraints ignore grants/RLS). | LJ (exists, unmerged) |
+| Reservation-row lock (`SELECT … FOR UPDATE` on the reservation, then check, then `UPDATE`, in one transaction) | Every S2-01 status change re-checks `loans.reservation_id` and `handover_operation ->> 'state'` while holding the same row lock that handover's final transaction holds while it inserts the loan. Either the status change commits first (handover re-check refuses and undoes — existing, tested) or the loan commits first (the status change sees it and applies the agreed rule). | LJ (S2-01) |
+| Immutable confirmed details | A `confirmed` reservation's `item_id`, `start_at`, `end_at`, `borrower_id` and `lab_id` never change (rescheduling = cancel + new). Database backstop: a `BEFORE UPDATE` trigger comparing only those five columns — it needs no access to `loans`. | LJ (S2-01) |
+| Handover | Unchanged: its own locks, re-checks on the locked row, guarded undo. | NH |
+
+Illustrative backstop for the immutable fields only (untested sketch; no status
+rule, because the permitted transitions are not agreed):
+
+```sql
+-- PROPOSAL ONLY. Untested. Awaiting JS/LJ agreement. Owner: LJ (S2-01).
+CREATE OR REPLACE FUNCTION public.reservations_confirmed_details_immutable()
+RETURNS trigger LANGUAGE plpgsql AS $$   -- SECURITY INVOKER (default)
+BEGIN
+  IF OLD.status = 'confirmed'
+     AND (NEW.item_id, NEW.start_at, NEW.end_at, NEW.borrower_id, NEW.lab_id)
+         IS DISTINCT FROM (OLD.item_id, OLD.start_at, OLD.end_at, OLD.borrower_id, OLD.lab_id) THEN
+    RAISE EXCEPTION 'A confirmed reservation''s item, dates, borrower and lab cannot be changed';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+```
+
+**Status changes after a handover are NOT banned wholesale.** Which
+transitions must stay permitted is a JS decision (see questions below). Once
+agreed, LJ enforces them in the S2-01 transaction under the row lock, and
+optionally as a trigger rule.
+
+**Service isolation under 006.** 006 gives `loans` and `reservations` access
+only to `unitrack_loans_service` (SELECT on reservations; SELECT/UPDATE on
+loans), with RLS on and exactly 18 `unitrack_*_service_*` policies checked by
+`postflight_006_read_only.sql`. Assumptions and consequences:
+
+- **Assumption:** S2-01 reservation writes run in the Loans service as
+  `unitrack_loans_service` (the pickup lookup already lives there). Then the
+  `loans` check uses Loans' existing SELECT grant and
+  `unitrack_loans_service_loans_select` policy — no new access to `loans` for any
+  role. Any trigger stays `SECURITY INVOKER`. It must not be `SECURITY DEFINER`:
+  run as the table owner, it would read `loans` outside RLS and the service
+  grants.
+- S2-01 needs its own additive, column-level grants on `reservations` (e.g.
+  `INSERT`, `UPDATE (status)`), in the style of this card's migration. Any new
+  policies must not match `unitrack\_%\_service\_%`, so 006's postflight still
+  counts 18. `SELECT … FOR UPDATE` needs UPDATE on at least one column; Loans
+  already has `UPDATE (handover_operation)` from this card's migration and will
+  have S2-01's grant.
+- If JS/LJ instead put reservation writes under **another role**, that role must
+  not get SELECT on `loans`. Options to agree first: route status changes
+  through Loans, or a narrow reviewed function (EXECUTE granted only to that
+  role) that returns only "has a loan / handover in progress" for one
+  reservation.
+
+**Questions for JS** (the proposal is blocked on these):
+
+1. Which reservation status transitions must remain permitted **while a handover
+   is in progress** (`planned`/`applied`/`compensating`) and **after a handover
+   completed** (loan exists, item out)? For example: `confirmed → cancelled` as
+   an admin correction, `confirmed → fulfilled` at handover or at return,
+   `confirmed → expired` after `end_at`.
+2. If a handed-over reservation may leave `confirmed`, should the exclusion
+   constraint also cover that status (e.g. `WHERE status IN ('confirmed',
+   'fulfilled')`) so that a new booking cannot overlap equipment that is out on
+   loan?
+3. Confirm the assumption that S2-01 reservation writes run in the Loans service.
+
+**NH (this card)** — no service change needed. After S2-02 merges:
+resolve the one-line `database/local-test/run.ps1` conflict (both add steps after
+006; order is independent), and adapt this card's PostgreSQL fixtures that
+insert overlapping confirmed reservations (the two-eligible-reservations test
+and the `finalOverlap` case insert a second overlapping `confirmed` row, which
+the constraint will reject with 23P01). Replace them with an assertion that the
+database rejects the overlap during a handover; keep the multiple-eligible rule
+covered by the service unit tests. Once JS has agreed the permitted transitions
+and S2-01 enforces them, add PostgreSQL tests for those transitions during and
+after a handover. Re-check the `finalCancel` case and the overlap-resolution step
+(which cancel a reservation) against that rule.
+
+### Other remaining limits (unchanged)
+
+1. **Users and Equipment checks are point-in-time HTTP reads.** A borrower
    deactivated or a kit component changed between the post-checkout re-check and
    the loan COMMIT is not detected (window of one local transaction).
-4. **Equipment and Loans commit separately.** A crash between Equipment checkout
+2. **Equipment and Loans commit separately.** A crash between Equipment checkout
    and the loan COMMIT leaves an `applied` plan, visible and recoverable, never a
    silent orphan; recovery is request-driven.
 
@@ -312,25 +438,35 @@ Shared Supabase was not used; no shared migration was applied.
   transaction). Equipment has no API that edits kit components today. If one is
   added, agree a version/lock contract (e.g. a component-list version or refusing
   edits while an item is reserved/checked out).
-- **PO:** pickup is allowed only during `start_at <= now < end_at` (Return's
-  existing active-pickup rule). Is early pickup needed?
-- **Reservations owner:** should handover mark the reservation `fulfilled`?
-  Handover does not change reservation status (Loans has no grant for it); the
-  unique `loans.reservation_id` already blocks a second handover. Does your card
-  move Equipment to `reserved` when the pickup window starts? Handover accepts
-  `reserved` or `available`.
-- **LJ (S2-01/S2-02, via JS) — reservation-owner changes still needed** (not
-  implemented here; S2-01/S2-02 not rewritten):
-  1. Prevent overlapping confirmed reservations for one item (database exclusion
-     constraint, or the same per-item lock below around the overlap check).
-  2. Take `pg_advisory_xact_lock(hashtextextended('loans:handover:item:' || item_id, 0))`
-     in the transaction that creates or confirms a reservation, so it serializes
-     with handover's final eligibility check.
-  3. Make `start_at`/`end_at` of a `confirmed` reservation immutable (e.g. a
-     `BEFORE UPDATE` trigger) and do not offer date edits for confirmed
-     reservations in the UI/API.
-  4. Keep `loans.reservation_id` unique and do not mark a reservation
-     `fulfilled`/`cancelled` while `handover_operation ->> 'state'` is
-     `planned`, `applied` or `compensating`.
+- **UNRESOLVED (JS to confirm) — pickup window end.** Earlier agreement:
+  `start_at <= now < end_at`. LJ's latest message: `now <= end_at`. **Kept:**
+  `now < end_at` (also used by SC's pickup lookup on `main`, Return, and matching
+  S2-02's half-open `[)` ranges). Note: with an inclusive end, two consecutive
+  reservations (allowed by S2-02) would both be eligible at the exact boundary
+  instant, which interacts with the next question.
+- **UNRESOLVED (JS to confirm) — multiple eligible reservations.** Earlier
+  agreement: they block handover. LJ's latest message: manual selection.
+  **Kept:** blocking (409 "More than one reservation is eligible…", same as SC's
+  `multipleEligibleReservations`). With S2-02 and the half-open window this case
+  cannot arise from `confirmed` rows; it can only arise if the inclusive end is
+  adopted.
+- **Answered by LJ (2026-11-19):** confirming a reservation does not move the
+  equipment to `reserved` (handover sees `available`, allowed by A2); handover
+  does not mark the reservation `fulfilled` (keep it `confirmed`, see the
+  exclusion-constraint note above).
+- **LJ (S2-01/S2-02, via JS) — still needed** (not implemented here; teammate
+  code not changed):
+  1. ~~Prevent overlapping confirmed reservations~~ — done on
+     `feature/S2-02-no-double-booking` (exclusion constraint), pending review and
+     a controlled shared application. The database owner should first run a
+     read-only check for existing overlapping `confirmed` rows, or the
+     `ADD CONSTRAINT` will fail.
+  2. ~~Per-item lock on create/confirm~~ — no longer needed for overlap once the
+     constraint is applied (see above).
+  3. **Open (LJ owns, in S2-01, which has not started):** reservation-side
+     protection as proposed above — row-locked status changes that check
+     `loans`/`handover_operation`, and immutable confirmed item/dates/borrower/lab.
+     This waits for JS's answer on permitted transitions. S2-02 implements no
+     handover coordination.
 - **SN (custody):** future loan-update protection must still allow Loans to INSERT
   handover loans and UPDATE `reservations.handover_operation`.
