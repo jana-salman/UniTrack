@@ -83,8 +83,11 @@ BEGIN
   ) ON public.loans TO unitrack_loans_service;
   GRANT UPDATE (handover_operation) ON public.reservations TO unitrack_loans_service;
 
-  -- Names deliberately avoid 006's unitrack_<service>_service_ policy pattern,
-  -- so 006's exact 18-policy postflight remains valid.
+  -- These policies are this card's own additions, separate from 006's reviewed
+  -- unitrack_<service>_service_* matrix (which they leave unchanged). They are
+  -- verified explicitly by database/local-test/verify_C430PRJCT-40.sql (name,
+  -- table, command, role; 006's 18 grants/policies unchanged) and by the
+  -- restricted-role PostgreSQL handover tests (insert rule refused with 42501).
   -- Defense in depth: a service-created loan must carry the student's
   -- confirmation AND the assistant's university-ID check, and cannot be created
   -- already returned. An existing earlier copy of this policy is upgraded in
