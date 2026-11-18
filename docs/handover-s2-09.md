@@ -216,6 +216,8 @@ exercised on a local database that had the earlier version applied and a real
 handover loan: the loan kept its values (ID-check columns NULL, nothing
 backfilled) and a second run was a no-op.
 
+**Full `run.ps1` passed on 2026-11-18 after the JS changes** (fresh container): preflight gates PASS; 003, 004, 005, 006 and this migration (applied twice) verified; static migration compatibility 5/5; existing Equipment/Loans (Return) PostgreSQL suite 3/3; handover PostgreSQL suite 21/21 as restricted roles.
+
 Shared Supabase was not touched. Verified on disposable PostgreSQL via
 `database/local-test/run.ps1` (applies it twice, runs
 `verify_C430PRJCT-40.sql` and `services/loans/tests/postgres-handover.integration.test.ts`
@@ -294,7 +296,7 @@ when it exits. Start Web normally. `-Action Teardown` removes everything.
 | Case | Result | Evidence (read-only queries on the local container) |
 |---|---|---|
 | TC-3.1 (re-run 2026-11-18, after the review fixes and A1/A2) | Pass | Reservation `…9921`: exactly **1** loan (borrower `…9902`, due date set, `student_confirmed_at` set, not returned); **6** `pickup` records = **1** main-item record (`kit_component_id` NULL) + **5** distinct records for the kit's 5 active components (Charger, Cable, Battery, Case, Tripod), all `good`, same lab, recorder set; item `checked_out`; plan state `completed`; 1 active loan on the item. |
-| TC-3.1 … TC-3.7 with the university-ID checkbox | **Pending** — needs a fresh `handover-manual.ps1 -Action Setup` (the earlier manual database predates the ID columns) | Automated coverage above; real-PostgreSQL suite passes with the ID check. |
+| TC-3.1 … TC-3.7 with the university-ID checkbox | **Pending (NH, in progress)** — on a fresh `handover-manual.ps1 -Action Setup` (the earlier manual database predated the ID columns) | Automated coverage above; full `run.ps1` passes with the ID check (2026-11-18). |
 | TC-3.4, TC-3.5, TC-3.7 | Pass (before the review fixes) | Missing charger saved as `missing` with its note; existing damage saved as `damaged` with its note and no photo; without confirmation the reservation stayed reserved and no loan was saved. Since then covered by the automated A1 and confirmation tests above; not re-run in the browser. |
 
 Shared Supabase was not used; no shared migration was applied.

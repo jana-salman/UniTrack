@@ -159,7 +159,7 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     await Promise.all([admin?.end(), loansPool?.end(), equipmentPool?.end(), usersPool?.end()]);
   });
 
-  it("TC-3.1: five Good components + confirmation -> one loan, five pickup records, Borrowed; replay writes nothing", async () => {
+  it("TC-3.1: main item + five Good components + ID check + confirmation -> one loan, six pickup records, Borrowed; replay writes nothing", async () => {
     const input = { studentConfirmed: true, conditions: kitChecklist(items.tc31) };
     const result = await submit(reservations.tc31, input);
     expect(result).toMatchObject({ reservationId: reservations.tc31, itemId: items.tc31, borrowerId, status: "checked_out" });

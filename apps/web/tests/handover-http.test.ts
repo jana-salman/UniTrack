@@ -30,7 +30,7 @@ describe("handover gateway", () => {
     expect(data.partialData).toBeUndefined();
   });
 
-  it("TC-3.1: five Good components + student confirmation -> Borrowed with borrower and due date", async () => {
+  it("TC-3.1: main item + five Good components + ID check + student confirmation -> Borrowed with borrower, due date and six pickup records", async () => {
     const response = await post(confirmBody());
     expect(response.status).toBe(200);
     const outcome = await response.json();
