@@ -40,6 +40,12 @@ export interface HandoverConditionInput {
 }
 export interface ConfirmHandoverInput {
   studentConfirmed: boolean;
+  /**
+   * PO decision A1: rows recorded as missing (kitComponentId, null = main item)
+   * that were listed in the student's on-screen confirmation. Must equal the
+   * set of missing rows, otherwise the confirmation does not cover them.
+   */
+  acknowledgedMissing?: (string | null)[];
   /** Version of the Equipment checklist shown to the assistant/student. */
   checklistVersion: string;
   conditions: HandoverConditionInput[];
@@ -156,6 +162,7 @@ export const HANDOVER_ERROR_MESSAGES = [
   "Invalid reservation ID.", "Reservation not found.",
   "Invalid handover information. Check every component.",
   "The student must confirm the handover before it can be completed.",
+  "The student's confirmation must include every item recorded as missing. Ask the student to confirm again.",
   "Only confirmed reservations can be handed over.",
   "The reservation pickup window has not started.",
   "The reservation pickup window has ended.",

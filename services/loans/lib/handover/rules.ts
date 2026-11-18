@@ -38,7 +38,24 @@ export function validateHandoverInput(value: unknown): ConfirmHandoverInput {
   // Order carries no meaning; a stable order keeps retry fingerprints equal.
   conditions.sort((a, b) => { const left = a.kitComponentId ?? "", right = b.kitComponentId ?? ""; return left < right ? -1 : left > right ? 1 : 0; });
   if (typeof body.checklistVersion !== "string" || !/^[a-f0-9]{64}$/.test(body.checklistVersion)) throw new HandoverRuleError("Missing checklist version.");
-  return { studentConfirmed: body.studentConfirmed === true, checklistVersion: body.checklistVersion, conditions };
+  const acknowledged = body.acknowledgedMissing === undefined ? [] : body.acknowledgedMissing;
+  if (!Array.isArray(acknowledged) || acknowledged.length > HANDOVER_MAX_ROWS
+    || !acknowledged.every(id => id === null || isProfileId(id))) throw new HandoverRuleError("Invalid missing-item acknowledgement.");
+  const acknowledgedMissing = [...new Set(acknowledged.map(id => (id === null ? null : id.toLowerCase())))]
+    .sort((a, b) => { const left = a ?? "", right = b ?? ""; return left < right ? -1 : left > right ? 1 : 0; });
+  return { studentConfirmed: body.studentConfirmed === true, checklistVersion: body.checklistVersion, acknowledgedMissing, conditions };
+}
+
+/**
+ * PO decision A1 (confirmed by ZZ): handover may proceed with a missing
+ * component only if it is disclosed, saved as missing with its note, and
+ * included in the student's confirmation. The confirmation must list exactly
+ * the rows recorded as missing in the same submission.
+ */
+export function confirmationCoversMissing(input: ConfirmHandoverInput): boolean {
+  const missing = new Set(input.conditions.filter(row => row.conditionStatus === "missing").map(row => row.kitComponentId));
+  const acknowledged = new Set(input.acknowledgedMissing ?? []);
+  return missing.size === acknowledged.size && [...missing].every(id => acknowledged.has(id));
 }
 
 /**
@@ -49,10 +66,10 @@ export function validateHandoverInput(value: unknown): ConfirmHandoverInput {
  * own assistant-chosen condition. Every row must be ticked; a missing
  * component is ticked AND marked missing.
  *
- * UNRESOLVED ASSUMPTION (awaiting Product Owner): checkout is allowed even when a
- * REQUIRED component is missing, because TC-3.4 needs the missing record saved
- * and condition records require a loan. isRequired is deliberately not checked
- * here; change this rule only after the PO answers (docs/handover-s2-09.md).
+ * PO decision A1 (confirmed by ZZ): a component - required or not - may be
+ * recorded Missing and handed over, provided the student's confirmation
+ * includes it (see confirmationCoversMissing). isRequired is therefore not a
+ * blocking rule here.
  */
 export function validateHandoverChecklist(components: HandoverKitComponent[], conditions: HandoverConditionInput[]): void {
   const active = new Set(components.filter(component => component.isActive).map(component => component.id.toLowerCase()));

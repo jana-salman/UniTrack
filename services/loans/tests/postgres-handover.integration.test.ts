@@ -31,8 +31,8 @@ const localDescribe = configuredDatabaseUrl ? describe.sequential : describe.ski
 const id = (suffix: string) => "00000000-0000-4000-8000-" + suffix.padStart(12, "0");
 const labId = 7201;
 const assistantId = id("901"), borrowerId = id("902"), inactiveBorrowerId = id("903"), otherAssistantId = id("904");
-const items = { tc31: id("911"), tc34: id("912"), tc35: id("913"), tc37: id("914"), outage: id("915"), laterChange: id("916"), laterAba: id("918"), overlap: id("917"), finalCancel: id("931"), finalOverlap: id("932"), inactive: id("933"), interrupted: id("934"), componentChange: id("935") };
-const reservations = { tc31: id("921"), tc34: id("922"), tc35: id("923"), tc37: id("924"), outage: id("925"), laterChange: id("926"), laterAba: id("929"), overlap: id("927"), finalCancel: id("941"), finalOverlap: id("942"), inactive: id("943"), interrupted: id("944"), componentChange: id("945") };
+const items = { tc31: id("911"), tc34: id("912"), tc35: id("913"), tc37: id("914"), outage: id("915"), laterChange: id("916"), laterAba: id("918"), overlap: id("917"), finalCancel: id("931"), finalOverlap: id("932"), inactive: id("933"), interrupted: id("934"), componentChange: id("935"), availableRace: id("936") };
+const reservations = { tc31: id("921"), tc34: id("922"), tc35: id("923"), tc37: id("924"), outage: id("925"), laterChange: id("926"), laterAba: id("929"), overlap: id("927"), finalCancel: id("941"), finalOverlap: id("942"), inactive: id("943"), interrupted: id("944"), componentChange: id("945"), availableRace: id("946") };
 const overlapSecondReservation = id("928");
 const names = ["Charger", "Cable", "Battery", "Case", "Tripod"];
 const componentIds = (item: string) => names.map((_, index) => id(item.slice(-3) + "c" + index));
@@ -43,7 +43,7 @@ let admin: Pool, loansPool: Pool, equipmentPool: Pool, usersPool: Pool;
 let usersDown = false;
 let failNextCheckout = false;
 // Hooks inject real database events between the Saga's steps.
-const hooks: { afterApply?: () => Promise<void>; beforeUndo?: () => Promise<void> } = {};
+const hooks: { beforeApply?: () => Promise<void>; afterApply?: () => Promise<void>; beforeUndo?: () => Promise<void> } = {};
 function restricted(role: string): Pool {
   const pool = new Pool({ connectionString: configuredDatabaseUrl, max: 4 });
   pool.on("connect", client => { void client.query("SET ROLE " + role); });
@@ -67,6 +67,7 @@ const equipment: HandoverEquipmentPort & { getComponents(): Promise<never[]> } =
     if (failNextCheckout) { failNextCheckout = false; throw new Error("Dummy Equipment outage before any change"); }
     const undo = input.idempotencyKey.endsWith(":undo");
     if (undo && hooks.beforeUndo) { const hook = hooks.beforeUndo; delete hooks.beforeUndo; await hook(); }
+    if (!undo && hooks.beforeApply) { const hook = hooks.beforeApply; delete hooks.beforeApply; await hook(); }
     const client = await equipmentPool.connect();
     try {
       const result = await updateEquipmentStatus(client, input.itemId, input.status, input.changedBy, input.labId, input.reason, {
@@ -127,8 +128,9 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     await admin.query("update public.profiles set is_active = false where id = $1", [inactiveBorrowerId]);
     for (const [key, item] of Object.entries(items)) {
       const kit = key !== "tc35";
+      const startStatus = key === "tc35" || key === "availableRace" ? "available" : "reserved";
       await admin.query("insert into public.equipment_items (id, asset_code, name, category_id, lab_id, status, condition) values ($1, $2, $3, 7201, $4, $5, 'good')",
-        [item, "S209-" + key.toUpperCase(), kit ? "Five-component kit " + key : "Oscilloscope", labId, kit ? "reserved" : "available"]);
+        [item, "S209-" + key.toUpperCase(), kit ? "Five-component kit " + key : "Oscilloscope", labId, startStatus]);
       if (kit) {
         await admin.query("insert into public.kits (item_id, lab_id) values ($1, $2)", [item, labId]);
         for (const [index, componentName] of names.entries()) {
@@ -177,7 +179,7 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
   });
 
   it("TC-3.4: a missing charger is stored as missing with its note", async () => {
-    const result = await submit(reservations.tc34, { studentConfirmed: true, conditions: kitChecklist(items.tc34, (row, i) => i === 0 ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : row) });
+    const result = await submit(reservations.tc34, { studentConfirmed: true, acknowledgedMissing: [componentIds(items.tc34)[0]], conditions: kitChecklist(items.tc34, (row, i) => i === 0 ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : row) });
     const charger = (await pickupFor(result.loanId)).find(row => row.kit_component_id === componentIds(items.tc34)[0]);
     expect(charger).toMatchObject({ condition_status: "missing", notes: "Charger not in the case" });
     expect(await itemStatus(items.tc34)).toBe("checked_out");
@@ -289,7 +291,7 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
   it("interrupted after checkout: durable 'applied' plan, no false success; another assistant finishes it without the browser", async () => {
     hooks.afterApply = async () => { usersDown = true; };
     const conditions = kitChecklist(items.interrupted, (row, i) => i === 0 ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : row);
-    await expect(submit(reservations.interrupted, { studentConfirmed: true, conditions })).rejects.toMatchObject({ status: 503, code: "handover_incomplete" });
+    await expect(submit(reservations.interrupted, { studentConfirmed: true, acknowledgedMissing: [componentIds(items.interrupted)[0]], conditions })).rejects.toMatchObject({ status: 503, code: "handover_incomplete" });
     usersDown = false;
     expect(await itemStatus(items.interrupted)).toBe("checked_out");
     expect(await loansFor(reservations.interrupted)).toHaveLength(0);
@@ -316,6 +318,19 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     expect((await admin.query("select count(*)::int as n from public.condition_records where item_id = $1", [items.componentChange])).rows[0].n).toBe(0);
     const history = await admin.query<{ new_status: string }>("select new_status from public.equipment_status_history where item_id = $1 order by id", [items.componentChange]);
     expect(history.rows.map(row => row.new_status)).toEqual(["checked_out", "reserved"]);
+  });
+
+  it("A2: an Available item changed by another writer after validation is rejected by Equipment; no loan, no duplicate checkout", async () => {
+    hooks.beforeApply = async () => {
+      const client = await equipmentPool.connect();
+      try { await updateEquipmentStatus(client, items.availableRace, "under_maintenance", otherAssistantId, labId, "Independent change before checkout", { expectedStatus: ["available"] }); }
+      finally { client.release(); }
+    };
+    await expect(submit(reservations.availableRace, { studentConfirmed: true, conditions: kitChecklist(items.availableRace) })).rejects.toMatchObject({ status: 409, code: "equipment_rejected" });
+    expect(await itemStatus(items.availableRace)).toBe("under_maintenance");
+    expect(await loansFor(reservations.availableRace)).toHaveLength(0);
+    const history = await admin.query<{ new_status: string }>("select new_status from public.equipment_status_history where item_id = $1 order by id", [items.availableRace]);
+    expect(history.rows.map(row => row.new_status)).toEqual(["under_maintenance"]);
   });
 
   it("the student confirmation is immutable for the restricted Loans role; Return-style updates still work", async () => {

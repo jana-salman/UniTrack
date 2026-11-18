@@ -50,7 +50,7 @@ describe("handover gateway", () => {
   });
 
   it("TC-3.4 and TC-3.5: missing charger and existing damage keep their notes through the gateway", async () => {
-    const response = await post(confirmBody(checklist((row, i) => i === 0 ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : i === 3 ? { ...row, conditionStatus: "damaged", notes: "Scratched lid" } : row)));
+    const response = await post({ ...confirmBody(checklist((row, i) => i === 0 ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : i === 3 ? { ...row, conditionStatus: "damaged", notes: "Scratched lid" } : row)), acknowledgedMissing: [kitComponents[0].id] });
     expect(response.status).toBe(200);
     const pickup = (await view()).handover.pickupConditions;
     expect(pickup.find((p: { kitComponentId: string }) => p.kitComponentId === kitComponents[0].id)).toMatchObject({ conditionStatus: "missing", notes: "Charger not in the case" });
@@ -203,7 +203,7 @@ describe("review fixes across the Web -> Loans -> Users/Equipment boundary", () 
 
   it("interrupted after checkout: page shows it, lab list shows it, Finish interrupted handover completes it", async () => {
     fixture.usersDownAfterCheckout = true;
-    const failed = await post(confirmBody(checklist((row, i) => i === 0 ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : row)));
+    const failed = await post({ ...confirmBody(checklist((row, i) => i === 0 ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : row)), acknowledgedMissing: [kitComponents[0].id] });
     expect(failed.status).toBe(503); expect((await failed.json()).code).toBe("handover_incomplete");
     expect(fixture.status).toBe("checked_out"); expect(fixture.db.state.loans).toHaveLength(0);
     fixture.usersDown = false; fixture.usersDownAfterCheckout = false;
@@ -227,5 +227,14 @@ describe("review fixes across the Web -> Loans -> Users/Equipment boundary", () 
   it("rejects a cross-origin recovery request", async () => {
     const response = await RECOVER(new Request("http://web.test/api/handover/" + reservationId + "/recover", { method: "POST", headers: { Origin: "http://attacker.test" } }), fixture.context());
     expect(response.status).toBe(403); expect(fixture.requests).toHaveLength(0);
+  });
+});
+
+describe("PO decision A1 through the gateway", () => {
+  it("refuses a missing component not included in the student's confirmation; nothing reaches Equipment", async () => {
+    const response = await post(confirmBody(checklist((row, i) => i === 0 ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : row)));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "student_confirmation_required", error: "The student's confirmation must include every item recorded as missing. Ask the student to confirm again." });
+    expect(fixture.requests.filter(r => r.service === "equipment")).toHaveLength(0); expect(fixture.db.state.loans).toHaveLength(0);
   });
 });

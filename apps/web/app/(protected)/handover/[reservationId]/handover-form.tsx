@@ -34,11 +34,24 @@ export default function HandoverForm({ reservationId, equipmentName, components,
   const [conditions, setConditions] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [studentConfirmed, setStudentConfirmed] = useState(false);
+  // Shown after the record changes under an existing confirmation.
+  const [confirmationCleared, setConfirmationCleared] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   // After an uncertain result, only the SAME information may be resent.
   const [retryPayload, setRetryPayload] = useState<ConfirmHandoverInput | null>(null);
   const student = borrowerName ?? "The student";
+  // What the student is confirming (PO decision A1): every row recorded as
+  // missing, with its note, plus any other recorded problem.
+  const recorded = rows.map(row => ({ ...row, condition: conditions[row.key] as ConditionStatus | undefined, note: (notes[row.key] ?? "").trim() }));
+  const missingRows = recorded.filter(row => row.condition === "missing");
+  const otherProblems = recorded.filter(row => row.condition === "damaged" || row.condition === "unknown");
+
+  /** Any change to the checklist after confirmation clears it (must reconfirm). */
+  function edit(apply: () => void) {
+    apply();
+    if (studentConfirmed) { setStudentConfirmed(false); setConfirmationCleared(true); }
+  }
 
   async function send(payload: ConfirmHandoverInput) {
     if (submitting) return;
@@ -83,6 +96,7 @@ export default function HandoverForm({ reservationId, equipmentName, components,
     await send({
       studentConfirmed: true,
       checklistVersion,
+      acknowledgedMissing: missingRows.map(row => row.id),
       conditions: rows.map(row => ({
         kitComponentId: row.id, checked: true,
         conditionStatus: conditions[row.key] as ConditionStatus,
@@ -105,7 +119,7 @@ export default function HandoverForm({ reservationId, equipmentName, components,
                 type="checkbox"
                 name={`checked-${row.key}`}
                 checked={checked[row.key] ?? false}
-                onChange={event => setChecked(current => ({ ...current, [row.key]: event.target.checked }))}
+                onChange={event => { const value = event.target.checked; edit(() => setChecked(current => ({ ...current, [row.key]: value }))); }}
                 className="h-5 w-5"
               />
               {row.label}{row.id !== null && !row.required ? " (optional)" : ""}
@@ -116,7 +130,7 @@ export default function HandoverForm({ reservationId, equipmentName, components,
             <select
               id={`condition-${row.key}`}
               value={conditions[row.key] ?? ""}
-              onChange={event => setConditions(current => ({ ...current, [row.key]: event.target.value }))}
+              onChange={event => { const value = event.target.value; edit(() => setConditions(current => ({ ...current, [row.key]: value }))); }}
               className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-slate-950"
             >
               <option value="">Choose condition</option>
@@ -129,7 +143,7 @@ export default function HandoverForm({ reservationId, equipmentName, components,
               rows={2}
               maxLength={HANDOVER_NOTES_MAX_LENGTH}
               value={notes[row.key] ?? ""}
-              onChange={event => setNotes(current => ({ ...current, [row.key]: event.target.value }))}
+              onChange={event => { const value = event.target.value; edit(() => setNotes(current => ({ ...current, [row.key]: value }))); }}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-950"
             />
           </div>
@@ -138,15 +152,35 @@ export default function HandoverForm({ reservationId, equipmentName, components,
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
           <h2 className="font-semibold text-slate-950">Student confirmation</h2>
           <p className="mt-1 text-sm text-slate-700">Hand this screen to {borrowerName ?? "the student"} to read the checklist and confirm.</p>
+          {missingRows.length > 0 && (
+            <div className="mt-3 rounded-md border border-red-300 bg-white p-3" data-testid="confirmation-missing">
+              <p className="font-semibold text-red-800">Missing — not being handed over:</p>
+              <ul className="mt-1 list-disc pl-5 text-slate-900">
+                {missingRows.map(row => <li key={row.key}>{row.label}{row.note ? ` — "${row.note}"` : ""}</li>)}
+              </ul>
+            </div>
+          )}
+          {otherProblems.length > 0 && (
+            <div className="mt-3 rounded-md border border-amber-300 bg-white p-3" data-testid="confirmation-problems">
+              <p className="font-semibold text-amber-900">Other recorded conditions:</p>
+              <ul className="mt-1 list-disc pl-5 text-slate-900">
+                {otherProblems.map(row => <li key={row.key}>{row.label}: {HANDOVER_CONDITION_LABELS[row.condition!]}{row.note ? ` — "${row.note}"` : ""}</li>)}
+              </ul>
+            </div>
+          )}
+          {confirmationCleared && !studentConfirmed && (
+            <p role="status" className="mt-3 text-sm font-semibold text-red-800">The checklist changed after the student confirmed. The student must confirm again.</p>
+          )}
           <label className="mt-3 flex min-h-11 items-start gap-3 text-slate-900">
             <input
               type="checkbox"
               name="student-confirmed"
               checked={studentConfirmed}
-              onChange={event => setStudentConfirmed(event.target.checked)}
+              onChange={event => { setStudentConfirmed(event.target.checked); if (event.target.checked) setConfirmationCleared(false); }}
               className="mt-0.5 h-5 w-5"
             />
-            {student} confirms receiving {equipmentName} in the condition recorded above.
+            {student} confirms receiving {equipmentName} in the condition recorded above
+            {missingRows.length > 0 ? `, including the ${missingRows.length} missing item${missingRows.length === 1 ? "" : "s"} listed here` : ""}.
           </label>
         </div>
 

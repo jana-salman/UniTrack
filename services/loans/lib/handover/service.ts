@@ -13,7 +13,7 @@ import { getDatabasePool } from "../db";
 import { LoansError, handoverUncertain } from "../errors";
 import type { BorrowerPort } from "../users-http";
 import type { HandoverEquipmentPort, HandoverKitComponent } from "./equipment-port";
-import { HandoverRuleError, checkFullEligibility, validateHandoverChecklist, validateHandoverInput } from "./rules";
+import { HandoverRuleError, checkFullEligibility, confirmationCoversMissing, validateHandoverChecklist, validateHandoverInput } from "./rules";
 import { saveHandoverRecordsInTransaction } from "./save-records";
 
 type PriorStatus = "reserved" | "available";
@@ -114,6 +114,9 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
     catch { throw new LoansError(400, "invalid_handover", "Invalid handover information. Check every component."); }
     // TC-3.7: without explicit student confirmation nothing is read or written.
     if (!input.studentConfirmed) throw new LoansError(400, "student_confirmation_required", "The student must confirm the handover before it can be completed.");
+    // PO decision A1: a missing component may be handed over only when the
+    // student's confirmation explicitly included it. Checked before any access.
+    if (!confirmationCoversMissing(input)) throw new LoansError(400, "student_confirmation_required", "The student's confirmation must include every item recorded as missing. Ask the student to confirm again.");
     fingerprint = createHash("sha256").update(JSON.stringify({ actor: actor.sub, reservationId, input })).digest("hex");
   }
   const lockKey = "loans:handover:" + reservationId;
@@ -204,11 +207,10 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
       await users.verifyBorrower(reservation.borrower_id);
       const item = await remote(() => equipment.getItem(reservation.item_id, actor.lab_id));
       if (!item || item.id !== reservation.item_id || item.labId !== actor.lab_id) throw new LoansError(404, "equipment_missing", "Equipment item not found.");
-      // No existing code moves an item to reserved when a reservation starts
-      // (only Return does, for an active pickup window), and data-model.md says
-      // reservations do not change physical status. A confirmed in-window
-      // reservation is therefore the authority; available is accepted too.
-      // UNRESOLVED ASSUMPTION pending the reservations owner (docs/handover-s2-09.md).
+      // PO decision A2 (confirmed by ZZ): an eligible confirmed reservation may
+      // be handed over while the item is Available. Duplicate checkout is
+      // prevented by the SC eligibility recheck, the per-item lock, Equipment's
+      // expectedStatus check and loans_one_active_per_item.
       if (item.status !== "reserved" && item.status !== "available") throw conflict("Only reserved or available equipment can be handed over.");
       const { components, version } = await componentsVersion(reservation.item_id);
       const checklist = op ? op.conditions : input!.conditions;

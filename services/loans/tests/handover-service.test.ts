@@ -30,8 +30,9 @@ const equipment = {
     const fingerprint = JSON.stringify(request);
     const old = receipts.get(request.idempotencyKey);
     if (old) { if (old.fingerprint !== fingerprint) throw new Error("Dummy key misuse"); return { changed: old.changed }; }
-    if (request.expectedOperationKey !== undefined && request.expectedOperationKey !== owner) throw new Error("Dummy ownership conflict");
-    if (!request.expectedStatus.includes(status)) throw new Error("Dummy status conflict");
+    // Like the real HTTP adapter: Equipment's 409 (ownership/status conflict) is a confirmed rejection.
+    if (request.expectedOperationKey !== undefined && request.expectedOperationKey !== owner) throw new LoansError(409, "equipment_rejected", "Equipment rejected the return operation. Verify its status before retrying.");
+    if (!request.expectedStatus.includes(status)) throw new LoansError(409, "equipment_rejected", "Equipment rejected the return operation. Verify its status before retrying.");
     const changed = status !== request.status; status = request.status; owner = request.idempotencyKey;
     receipts.set(request.idempotencyKey, { fingerprint, changed });
     if (loss) { loss = false; throw new Error("Dummy lost response after committed Equipment change"); }
@@ -90,7 +91,7 @@ describe("acceptance criteria", () => {
 
   it("TC-3.4: a missing charger is recorded missing with its note and is not marked present", async () => {
     const conditions = goodChecklist().map(row => row.kitComponentId === chargerId ? { ...row, conditionStatus: "missing", notes: "  Charger not in the case  " } : row);
-    await confirm(body(conditions));
+    await confirm({ ...body(conditions), acknowledgedMissing: [chargerId] });
     expect(componentRow(chargerId)).toMatchObject({ condition_status: "missing", notes: "Charger not in the case", phase: "pickup" });
     expect(db.state.records.filter(r => r.condition_status === "good")).toHaveLength(5);
     expect(db.state.records).toHaveLength(6);
@@ -271,7 +272,7 @@ describe("kit membership / component changes", () => {
 describe("interrupted handovers: durable recovery without the browser", () => {
   it("lost checkout response, browser closed: the starter finishes from the stored plan (no checklist resent)", async () => {
     const conditions = goodChecklist().map(row => row.kitComponentId === chargerId ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : row);
-    loss = true; await expect(confirm(body(conditions))).rejects.toMatchObject({ code: "handover_state_uncertain" });
+    loss = true; await expect(confirm({ ...body(conditions), acknowledgedMissing: [chargerId] })).rejects.toMatchObject({ code: "handover_state_uncertain" });
     expect(status).toBe("checked_out"); nothingSaved();
     const details = await getHandoverDetails(reservationId, labId, assistantId);
     expect(details?.pending).toMatchObject({ state: "planned", recoverableByYou: true });
@@ -491,5 +492,73 @@ describe("SC eligibility rules, at plan time and independently at final submissi
     db.state.otherReservations.length = 0;
     const result = await confirm();
     expect(result.status).toBe("checked_out"); expect(calls[2].idempotencyKey).toMatch(/:1:apply$/); expect(db.state.loans).toHaveLength(1);
+  });
+});
+
+describe("PO decision A1 (ZZ): missing components must be disclosed in the student's confirmation", () => {
+  const missingCharger = () => goodChecklist().map(row => row.kitComponentId === chargerId ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : row);
+  it("refuses a missing component the confirmation did not include, before any access", async () => {
+    await expect(confirm(body(missingCharger()))).rejects.toMatchObject({ status: 400, code: "student_confirmation_required", message: "The student's confirmation must include every item recorded as missing. Ask the student to confirm again." });
+    expect(db.sql).toHaveLength(0); expect(equipment.getItem).not.toHaveBeenCalled(); expect(users.verifyBorrower).not.toHaveBeenCalled(); nothingSaved();
+  });
+  it.each([
+    ["a different component", () => [kitComponents[1].id]],
+    ["an extra component", () => [chargerId, kitComponents[1].id]],
+    ["a malformed entry", () => ["charger"]],
+  ])("refuses an acknowledgement listing %s", async (_name, list) => {
+    await expect(confirm({ ...body(missingCharger()), acknowledgedMissing: list() })).rejects.toMatchObject({ status: 400 });
+    expect(db.sql).toHaveLength(0); nothingSaved();
+  });
+  it("refuses an acknowledgement of a missing item when nothing is recorded missing", async () => {
+    await expect(confirm({ ...body(), acknowledgedMissing: [chargerId] })).rejects.toMatchObject({ code: "student_confirmation_required" }); nothingSaved();
+  });
+  it("proceeds when the confirmation includes the missing component; saves it missing with its note", async () => {
+    const result = await confirm({ ...body(missingCharger()), acknowledgedMissing: [chargerId.toUpperCase()] });
+    expect(result.status).toBe("checked_out");
+    expect(componentRow(chargerId)).toMatchObject({ condition_status: "missing", notes: "Charger not in the case" });
+    expect(db.state.loans[0].student_confirmed_at).toBeInstanceOf(Date);
+  });
+  it("covers a REQUIRED component and a missing main item too", async () => {
+    expect(kitComponents[0].isRequired).toBe(true);
+    const conditions = missingCharger().map(row => row.kitComponentId === null ? { ...row, conditionStatus: "missing", notes: "Only accessories present" } : row);
+    await confirm({ ...body(conditions), acknowledgedMissing: [null, chargerId] });
+    expect(mainRow()).toMatchObject({ condition_status: "missing", notes: "Only accessories present" });
+  });
+  it("without confirmation, nothing is saved even when the missing item was acknowledged", async () => {
+    await expect(confirm({ ...body(missingCharger(), false), acknowledgedMissing: [chargerId] })).rejects.toMatchObject({ code: "student_confirmation_required" });
+    expect(db.sql).toHaveLength(0); nothingSaved(); expect(status).toBe("reserved");
+  });
+  it("binds the acknowledgement into the replay fingerprint", async () => {
+    const first = await confirm({ ...body(missingCharger()), acknowledgedMissing: [chargerId] });
+    expect(await confirm({ ...body(missingCharger()), acknowledgedMissing: [chargerId] })).toEqual(first);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("PO decision A2 (ZZ): eligible reservations may be handed over while Available, without duplicate checkout", () => {
+  beforeEach(() => { status = "available"; });
+  it("hands over Available equipment with expectedStatus [available] and one keyed checkout", async () => {
+    const result = await confirm();
+    expect(result.status).toBe("checked_out"); expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ expectedStatus: ["available"], status: "checked_out" });
+  });
+  it("rechecks eligibility at submission: an active loan blocks it", async () => {
+    db.state.loans.push({ id: otherLoanId, item_id: kitItemId, borrower_id: borrowerId, reservation_id: null, lab_id: labId, borrowed_at: new Date(), due_date: new Date(Date.now() + 1e6), student_confirmed_at: null, returned_at: null });
+    await expect(confirm()).rejects.toMatchObject({ status: 409, message: "This equipment is already on loan." }); expect(calls).toHaveLength(0);
+  });
+  it("a concurrent status change between validation and checkout is rejected by Equipment; no loan", async () => {
+    // Someone else checks the item out after Loans validated it as Available.
+    equipment.getKitComponents.mockImplementationOnce(async () => { status = "checked_out"; return structuredClone(components); });
+    await expect(confirm()).rejects.toMatchObject({ status: 409, code: "equipment_rejected" });
+    expect(db.state.loans).toHaveLength(0);
+  });
+  it("concurrent submissions for the same Available reservation check it out once", async () => {
+    const results = await Promise.allSettled([confirm(), confirm(), confirm()]);
+    expect(results.filter(r => r.status === "fulfilled").length).toBeGreaterThanOrEqual(1);
+    expect(calls).toHaveLength(1); expect(db.state.loans).toHaveLength(1);
+  });
+  it("a second eligible reservation for the same Available item blocks handover", async () => {
+    db.state.otherReservations.push({ id: "7c9e6679-7425-40de-944b-e07fc1f900b1", item_id: kitItemId, status: "confirmed", start_at: new Date(Date.now() - 60_000), end_at: new Date(Date.now() + 3600_000) });
+    await expect(confirm()).rejects.toMatchObject({ status: 409 }); expect(calls).toHaveLength(0);
   });
 });

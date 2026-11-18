@@ -169,3 +169,60 @@ it("an interrupted handover shows Finish interrupted handover, which completes i
   expect(host.textContent).toContain("Equipment status: Borrowed");
   expect(fixture.db.state.loans).toHaveLength(1); expect(fixture.db.state.records).toHaveLength(6); expect(fixture.history).toHaveLength(1);
 });
+it("A1: the student's confirmation explicitly lists each missing component with its note", async () => {
+  await open();
+  const all = rows();
+  await fillRow(all[0]);
+  await fillRow(all[1], "missing", "Charger not in the case");
+  for (const row of all.slice(2)) await fillRow(row);
+  const disclosure = host.querySelector('[data-testid="confirmation-missing"]');
+  expect(disclosure?.textContent).toContain("Missing — not being handed over:");
+  expect(disclosure?.textContent).toContain('Charger — "Charger not in the case"');
+  expect(studentBox().closest("label")?.textContent).toContain("including the 1 missing item listed here");
+  await click(studentBox()); await submit();
+  await waitForUi(() => expect(host.textContent).toContain("Handover complete"));
+  expect(fixture.db.state.records.find(r => r.kit_component_id === kitComponents[0].id)).toMatchObject({ condition_status: "missing", notes: "Charger not in the case" });
+  expect(fixture.db.state.loans[0].student_confirmed_at).toBeInstanceOf(Date);
+});
+
+it("A1: existing damage and Needs attention are also shown to the student before confirming", async () => {
+  await open();
+  const all = rows();
+  for (const row of all) await fillRow(row);
+  await setValue(all[4].querySelector("select")!, "damaged");
+  await setValue(all[4].querySelector("textarea")!, "Scratched lid");
+  expect(host.querySelector('[data-testid="confirmation-problems"]')?.textContent).toContain('Case: Existing damage — "Scratched lid"');
+});
+
+it.each([
+  ["a condition", async (all: HTMLElement[]) => setValue(all[2].querySelector("select")!, "missing")],
+  ["a note", async (all: HTMLElement[]) => setValue(all[0].querySelector("textarea")!, "added after confirmation")],
+  ["a tick", async (all: HTMLElement[]) => click(all[3].querySelector<HTMLInputElement>('input[type="checkbox"]')!)],
+])("changing %s after confirmation clears it, blocks submission, and requires confirmation again", async (_name, change) => {
+  await open();
+  const all = rows();
+  for (const row of all) await fillRow(row);
+  await click(studentBox());
+  expect(studentBox().checked).toBe(true);
+  await change(all);
+  expect(studentBox().checked).toBe(false);
+  expect(host.textContent).toContain("The checklist changed after the student confirmed. The student must confirm again.");
+  await submit();
+  await waitForUi(() => expect(host.querySelector('[role="alert"]')?.textContent).toBeTruthy());
+  expect(loanPosts()).toHaveLength(0); expect(fixture.db.state.loans).toHaveLength(0);
+});
+
+it("after reconfirming the changed checklist, the handover saves exactly what was reconfirmed", async () => {
+  await open();
+  const all = rows();
+  for (const row of all) await fillRow(row);
+  await click(studentBox());
+  await setValue(all[1].querySelector("select")!, "missing");
+  await setValue(all[1].querySelector("textarea")!, "Lost before pickup");
+  expect(studentBox().checked).toBe(false);
+  expect(host.querySelector('[data-testid="confirmation-missing"]')?.textContent).toContain('Charger — "Lost before pickup"');
+  await click(studentBox()); await submit();
+  await waitForUi(() => expect(host.textContent).toContain("Handover complete"));
+  expect(fixture.db.state.records.find(r => r.kit_component_id === kitComponents[0].id)).toMatchObject({ condition_status: "missing", notes: "Lost before pickup" });
+  expect(loanPosts()).toHaveLength(1);
+});

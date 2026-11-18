@@ -6,25 +6,34 @@ notes), and the student ticks the confirmation box on the same screen. The
 handover is complete only after that confirmation and a successful Equipment
 checkout.
 
-## Unresolved assumptions (not accepted requirements)
+## Product Owner decisions (confirmed by ZZ)
 
-- **A1 — missing required component.** Checkout is currently allowed when a
-  *required* component is marked Missing. This is NOT a confirmed policy. It was
-  chosen only because TC-3.4 needs the missing-charger record saved and
-  `condition_records.loan_id` is mandatory. Awaiting the Product Owner; if the
-  answer is "block", add an `isRequired` check in
-  `services/loans/lib/handover/rules.ts` (no schema change needed).
-- **A2 — `available` accepted at handover.** Checked against the existing code:
-  nothing creates reservations or moves an item to `reserved` when a reservation
-  starts; the only writer of `reserved` is Return (active pickup window), and
-  `database/data-model.md` says reservations do not change physical status. An
-  item with a valid confirmed in-window reservation can therefore still be
-  `available`, so handover accepts `reserved` or `available` and never changes a
-  reservation rule. This does **not** conflict with TC-3.7: an unconfirmed
-  attempt makes no Equipment call at all, so a Reserved item stays Reserved (and
-  an Available one stays Available). Awaiting the reservations owner; if items
-  must always be `reserved` first, remove `available` in
-  `services/loans/lib/handover/service.ts`.
+- **A1 — missing components (RESOLVED).** Handover may proceed with a missing
+  component (required or not) if it is clearly disclosed, saved as `missing` with
+  its note, and included in the student's confirmation; without confirmation no
+  loan is saved. Implemented as:
+  - The confirmation box lists every row recorded Missing, with its note
+    ("Missing — not being handed over"), and other recorded problems; the
+    confirmation sentence states how many missing items the student accepts.
+  - Any change to a tick, condition or note after the student confirmed clears
+    the confirmation and shows "The student must confirm again"; the form will
+    not submit until the student reconfirms.
+  - The submission carries `acknowledgedMissing` (the rows shown as missing).
+    Loans requires it to equal exactly the rows recorded missing, otherwise 400
+    `student_confirmation_required` before any database or Equipment access.
+    It is part of the replay fingerprint.
+  - Limit: the server proves the confirmation covered the missing *rows* that
+    were submitted; that the student actually read the screen is a physical
+    process at the counter.
+- **A2 — Available equipment (RESOLVED).** An eligible confirmed reservation may
+  be handed over while the item is Available. Eligibility is rechecked at
+  submission, and duplicate checkout is prevented by: the per-reservation session
+  lock; the per-item transaction lock and SC rules (no active loan, exactly one
+  eligible reservation) on locked rows before checkout and in the final
+  transaction; Equipment's `expectedStatus` check under its item row lock (a
+  concurrent status change makes the checkout fail with 409, no loan); and the
+  `loans_one_active_per_item` / unique `reservation_id` indexes. The
+  cross-service limits below still apply.
 
 ## Behaviour
 
@@ -33,7 +42,8 @@ checkout.
 | Lab assistants only (`lab_assistant`; managers, professors and students are denied) | Page guard, Web gateway (before any service call), Loans route + service |
 | Student must confirm (`studentConfirmed: true`) | Loans rejects with 400 `student_confirmation_required` before any database or Equipment access; RLS on new loans also requires `student_confirmed_at` |
 | SC eligibility: reservation and equipment in the assistant's lab; `confirmed`; `start_at <= server now < end_at`; no active loan for the item; it is the ONLY confirmed reservation for the item whose window contains now | Loans, on locked rows: when the plan is made, before a new attempt after an undo, and again in the final loan transaction at the server's current time. A per-item transaction lock (`loans:handover:item:<id>`) serializes handovers of different reservations for one item. Failing at final submission undoes the checkout (ownership-guarded) and returns the failed rule as 409. |
-| Equipment status must be `reserved` or `available` (**unresolved assumption A2**) | Loans (read from Equipment over HTTP) |
+| Equipment status must be `reserved` or `available` (**PO decision A2**) | Loans (read from Equipment over HTTP); Equipment re-checks it under its row lock at checkout |
+| Missing items must be included in the student's confirmation (**PO decision A1**) | Page lists them in the confirmation box and clears confirmation on any edit; Loans requires `acknowledgedMissing` to match the missing rows |
 | Checklist = one **main-item** row (`kitComponentId: null`, the kit itself or the non-kit item, with its own explicit condition) **plus**, for kits, every **active** component exactly once (actual IDs); every row ticked; valid condition; notes ≤ 1000 chars | Loans, against Equipment's component list |
 | Checklist must match what was shown: the page sends `checklistVersion` (SHA-256 of the canonical component list from Equipment) | Loans recomputes it from Equipment before checkout **and again after checkout**; a mismatch is 409 "component list changed" (after checkout: guarded undo, no records) |
 | Borrower identity verified through **Users** (`GET /profiles/:id/borrower`: same-lab, active) | Loans before checkout and again after checkout. Not found/inactive → 409 `borrower_unverified` (after checkout: guarded undo). Users unreachable → 503 `borrower_unavailable` before checkout (nothing changed) or `handover_incomplete` after checkout (durable plan kept for recovery). The page shows the checklist only when Users reports the borrower verified; a displayed name never counts. |
@@ -199,7 +209,8 @@ when it exits. Start Web normally. `-Action Teardown` removes everything.
 
 ## Open questions
 
-- **PO (A1):** may a kit be handed over when a *required* component is missing?
+- **Still open for JS — not resolved by the PO decisions above:** the identity
+  interpretation and the cross-service concurrency limits below.
 - **JS / PO (identity):** is verifying the reservation's borrower through Users
   (exists, same lab, active) the intended "verify student identity", or must the
   assistant also check something physically on screen (e.g. tick "student ID card
