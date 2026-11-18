@@ -1,4 +1,3 @@
-
 import "server-only";
 
 import {
@@ -214,6 +213,11 @@ export async function forwardPickupMatch(
       );
     }
 
+    // Handover is permitted only for available or reserved equipment.
+    const hasEligibleEquipmentStatus =
+      equipmentPayload.status === "available" ||
+      equipmentPayload.status === "reserved";
+
     return Response.json(
       {
         equipment: {
@@ -236,7 +240,8 @@ export async function forwardPickupMatch(
           })),
         multipleEligibleReservations:
           matchPayload.multipleEligibleReservations,
-        canHandover: matchPayload.canHandover,
+        canHandover:
+          matchPayload.canHandover && hasEligibleEquipmentStatus,
       },
       {
         headers: {

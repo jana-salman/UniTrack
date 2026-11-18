@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
@@ -252,24 +251,25 @@ export default function ScanResult({
                         ).toLocaleString()}
                       </p>
 
+                      {/* Temporarily disabled until S2-09 is integrated. */}
+                      <button
+                        type="button"
+                        disabled
+                        className="mt-3 cursor-not-allowed rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-500"
+                      >
+                        {match.canHandover &&
+                        reservation.eligibility === "eligible"
+                          ? "Proceed to Handover"
+                          : "Handover unavailable"}
+                      </button>
+
                       {match.canHandover &&
-                      reservation.eligibility === "eligible" ? (
-                        <Link
-                          href={`/handover/${reservation.id}`}
-                          prefetch={false}
-                          className="mt-3 inline-block rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
-                        >
-                          Proceed to Handover
-                        </Link>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled
-                          className="mt-3 cursor-not-allowed rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-500"
-                        >
-                          Handover unavailable
-                        </button>
-                      )}
+                        reservation.eligibility === "eligible" && (
+                          <p className="mt-2 text-sm text-slate-600">
+                            Handover is temporarily disabled pending
+                            integration.
+                          </p>
+                        )}
                     </div>
                   ))}
                 </div>

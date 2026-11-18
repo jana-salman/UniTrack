@@ -1,4 +1,3 @@
-
 import {
   beforeEach,
   afterEach,
@@ -123,6 +122,42 @@ describe("GET /api/reservations/pickup", () => {
       "private, no-store",
     );
   });
+
+  // Handover requires both an eligible reservation
+  // and an eligible equipment status.
+  it.each([
+    ["available", true],
+    ["reserved", true],
+    ["checked_out", false],
+    ["inspection_required", false],
+    ["under_maintenance", false],
+    ["retired", false],
+  ] as const)(
+    "enforces handover eligibility for equipment status %s",
+    async (status, expectedCanHandover) => {
+      mocks.equipment.mockResolvedValueOnce(
+        json({ ...equipment, status }),
+      );
+
+      mocks.loans.mockResolvedValueOnce(
+        json({
+          ...emptyMatch,
+          confirmedReservations: [reservation],
+          canHandover: true,
+        }),
+      );
+
+      const response = await GET(request());
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.equipment.status).toBe(status);
+      expect(data.activeLoan).toBeNull();
+      expect(data.confirmedReservations).toEqual([reservation]);
+      expect(data.multipleEligibleReservations).toBe(false);
+      expect(data.canHandover).toBe(expectedCanHandover);
+    },
+  );
 
   it.each(["upcoming", "expired"])(
     "returns a %s reservation without enabling handover",
