@@ -1,12 +1,16 @@
-
 import { requirePageProfile } from "@/lib/auth/authorization";
 import EquipmentLookupClient from "@/components/equipment/equipment-lookup-client";
 
 export default async function EquipmentLookupPage() {
-  await requirePageProfile([
+  const profile = await requirePageProfile([
     "lab_manager",
     "lab_assistant",
+    "professor",
   ]);
+
+  const canReplaceQrLabel =
+    profile.role === "lab_manager" ||
+    profile.role === "lab_assistant";
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
@@ -21,12 +25,15 @@ export default async function EquipmentLookupPage() {
 
         <p className="mt-3 leading-7 text-slate-600">
           Search for equipment using its UUID, asset code,
-          or serial number. You can also print a replacement
-          QR label for damaged or missing labels.
+          or serial number.
+          {canReplaceQrLabel &&
+            " You can also print a replacement QR label for damaged or missing labels."}
         </p>
       </section>
 
-      <EquipmentLookupClient />
+      <EquipmentLookupClient
+        canReplaceQrLabel={canReplaceQrLabel}
+      />
     </main>
   );
 }

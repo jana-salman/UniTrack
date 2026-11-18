@@ -1,4 +1,3 @@
-
 import { NextResponse } from "next/server";
 import { requireRole } from "../../../lib/auth/authorization";
 import { findItemByIdentifier } from "../../../lib/item-lookups";
@@ -7,10 +6,11 @@ import { lookupError } from "../../../lib/http";
 // GET /items/lookup?q=FPGA-003
 export async function GET(request: Request) {
   try {
-    // Only lab assistants and lab managers can look up equipment.
+    // Authorized staff can perform read-only equipment lookup.
     const user = await requireRole(request, [
       "lab_assistant",
       "lab_manager",
+      "professor",
     ]);
 
     const { searchParams } = new URL(request.url);
