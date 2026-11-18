@@ -13,13 +13,16 @@ export async function saveHandoverRecordsInTransaction(
   labId: number,
   conditions: HandoverConditionInput[],
   recordedBy: string,
+  idVerifiedBy: string,
 ): Promise<void> {
   const loan = await client.query(
     `insert into public.loans
-     (id, item_id, borrower_id, reservation_id, lab_id, borrowed_at, due_date, student_confirmed_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8)
+     (id, item_id, borrower_id, reservation_id, lab_id, borrowed_at, due_date, student_confirmed_at,
+      university_id_verified_at, university_id_verified_by)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      returning id`,
-    [result.loanId, result.itemId, result.borrowerId, result.reservationId, labId, result.borrowedAt, result.dueDate, result.studentConfirmedAt],
+    [result.loanId, result.itemId, result.borrowerId, result.reservationId, labId, result.borrowedAt, result.dueDate, result.studentConfirmedAt,
+      result.universityIdVerifiedAt, idVerifiedBy],
   );
   if (loan.rows.length !== 1) throw new Error("The loan was not created.");
 

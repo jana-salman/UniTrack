@@ -19,6 +19,7 @@ export const chargerId = kitComponents[0].id;
 export interface LoanRow {
   id: string; item_id: string; borrower_id: string; reservation_id: string | null; lab_id: number;
   borrowed_at: Date; due_date: Date; student_confirmed_at: Date | null; returned_at: Date | null;
+  university_id_verified_at?: Date | null; university_id_verified_by?: string | null;
 }
 export interface RecordRow {
   id: string; loan_id: string; item_id: string; kit_component_id: string | null; lab_id: number;
@@ -118,10 +119,13 @@ export function handoverDatabase() {
     if (text.includes("from public.loans where item_id = $1 and returned_at is null")) return { rows: state.loans.filter(l => l.item_id === values[0] && !l.returned_at).map(l => ({ id: l.id })) };
     if (text.includes("insert into public.loans")) {
       if (settings.loanFailure) throw new Error("Dummy private loan insert failure");
-      const [id, item_id, borrower_id, reservation_id, lab_id, borrowed_at, due_date, student_confirmed_at] = values as [string, string, string, string, number, string, string, string];
+      const [id, item_id, borrower_id, reservation_id, lab_id, borrowed_at, due_date, student_confirmed_at, id_verified_at, id_verified_by] = values as [string, string, string, string, number, string, string, string, string, string];
+      // Model the migration's insert policy (confirmation AND ID check required).
+      if (!student_confirmed_at || !id_verified_at || !id_verified_by) throw Object.assign(new Error("new row violates row-level security policy"), { code: "42501" });
       // Model the reservation_id UNIQUE and loans_one_active_per_item indexes.
       if (state.loans.some(l => l.reservation_id === reservation_id || (l.item_id === item_id && !l.returned_at))) throw Object.assign(new Error("duplicate key"), { code: "23505" });
-      state.loans.push({ id, item_id, borrower_id, reservation_id, lab_id, borrowed_at: new Date(borrowed_at), due_date: new Date(due_date), student_confirmed_at: new Date(student_confirmed_at), returned_at: null });
+      state.loans.push({ id, item_id, borrower_id, reservation_id, lab_id, borrowed_at: new Date(borrowed_at), due_date: new Date(due_date), student_confirmed_at: new Date(student_confirmed_at), returned_at: null,
+        university_id_verified_at: new Date(id_verified_at), university_id_verified_by: id_verified_by });
       return { rows: [{ id }] };
     }
     if (text.includes("insert into public.condition_records")) {

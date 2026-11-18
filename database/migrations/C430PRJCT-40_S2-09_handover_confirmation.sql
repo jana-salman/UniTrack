@@ -1,4 +1,5 @@
--- C430PRJCT-40 / S2-09 handover: student confirmation and recoverable pickup.
+-- C430PRJCT-40 / S2-09 handover: student confirmation, assistant university-ID
+-- check and recoverable pickup.
 -- Review and apply separately AFTER 004 and 006. Never run at application startup.
 --
 -- Additive only:
@@ -14,7 +15,15 @@
 --     column of a reservation. Table-level ACLs from 006 are unchanged.
 --   * condition_records stays insert-only for Loans; loans/condition_records
 --     delete triggers and immutable history are untouched.
---   * A trigger makes loans.student_confirmed_at immutable after insert.
+--   * loans.university_id_verified_at / university_id_verified_by record that
+--     the lab assistant physically checked the student's university ID (PO
+--     decision via JS). Only who and when: no ID number, upload or photo.
+--     Both NULL or both set; existing loans keep NULL; nothing is backfilled.
+--   * A trigger makes the confirmation and ID-check columns immutable after insert.
+--
+-- Amended in place before any shared application (it exists only on the
+-- unmerged S2-09 branch). Re-running it upgrades any earlier local copy: the
+-- columns/constraint are added if missing and the insert policy is altered.
 --
 -- Idempotent. If 006 is applied AFTER this file, run this file again: 006
 -- revokes all table privileges, which also removes these column grants.
@@ -22,22 +31,42 @@ BEGIN;
 
 ALTER TABLE public.loans ADD COLUMN IF NOT EXISTS student_confirmed_at TIMESTAMPTZ;
 ALTER TABLE public.reservations ADD COLUMN IF NOT EXISTS handover_operation JSONB;
+ALTER TABLE public.loans ADD COLUMN IF NOT EXISTS university_id_verified_at TIMESTAMPTZ;
+ALTER TABLE public.loans ADD COLUMN IF NOT EXISTS university_id_verified_by UUID
+  REFERENCES public.profiles(id) ON DELETE RESTRICT;
 
--- Custody protection: the student's confirmation is evidence and is fixed once
--- the loan is inserted. 006 grants Loans table-level UPDATE on loans (Return
--- needs returned_at/return_operation), so without this trigger a later update
--- could add, change or clear a confirmation. Other columns are unaffected.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.loans'::regclass AND conname = 'loans_university_id_verification_pair'
+  ) THEN
+    ALTER TABLE public.loans ADD CONSTRAINT loans_university_id_verification_pair
+      CHECK ((university_id_verified_at IS NULL) = (university_id_verified_by IS NULL));
+  END IF;
+END;
+$$;
+
+-- Custody protection: the student's confirmation and the assistant's ID check
+-- are evidence and are fixed once the loan is inserted. 006 grants Loans
+-- table-level UPDATE on loans (Return needs returned_at/return_operation), so
+-- without this trigger a later update could add, change or clear them. Other
+-- columns are unaffected. (Names kept from the first version for re-runs.)
 CREATE OR REPLACE FUNCTION public.protect_loan_student_confirmation()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.student_confirmed_at IS DISTINCT FROM OLD.student_confirmed_at THEN
     RAISE EXCEPTION 'loans.student_confirmed_at cannot be changed after the loan is created';
   END IF;
+  IF NEW.university_id_verified_at IS DISTINCT FROM OLD.university_id_verified_at
+     OR NEW.university_id_verified_by IS DISTINCT FROM OLD.university_id_verified_by THEN
+    RAISE EXCEPTION 'loans university ID verification cannot be changed after the loan is created';
+  END IF;
   RETURN NEW;
 END;
 $$;
 CREATE OR REPLACE TRIGGER loans_student_confirmation_immutable
-BEFORE UPDATE OF student_confirmed_at ON public.loans
+BEFORE UPDATE OF student_confirmed_at, university_id_verified_at, university_id_verified_by ON public.loans
 FOR EACH ROW EXECUTE FUNCTION public.protect_loan_student_confirmation();
 
 DO $$
@@ -49,23 +78,33 @@ BEGIN
 
   GRANT INSERT (
     id, item_id, borrower_id, reservation_id, lab_id,
-    borrowed_at, due_date, student_confirmed_at
+    borrowed_at, due_date, student_confirmed_at,
+    university_id_verified_at, university_id_verified_by
   ) ON public.loans TO unitrack_loans_service;
   GRANT UPDATE (handover_operation) ON public.reservations TO unitrack_loans_service;
 
   -- Names deliberately avoid 006's unitrack_<service>_service_ policy pattern,
   -- so 006's exact 18-policy postflight remains valid.
+  -- Defense in depth: a service-created loan must carry the student's
+  -- confirmation AND the assistant's university-ID check, and cannot be created
+  -- already returned. An existing earlier copy of this policy is upgraded in
+  -- place with ALTER POLICY (same name, role and command; nothing dropped).
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname = 'public' AND tablename = 'loans'
       AND policyname = 'c430prjct_40_loans_handover_insert'
   ) THEN
-    -- Defense in depth: a service-created loan must carry student confirmation
-    -- and cannot be created already returned.
     CREATE POLICY c430prjct_40_loans_handover_insert ON public.loans
       FOR INSERT TO unitrack_loans_service
       WITH CHECK (student_confirmed_at IS NOT NULL AND returned_at IS NULL);
   END IF;
+  ALTER POLICY c430prjct_40_loans_handover_insert ON public.loans
+    WITH CHECK (
+      student_confirmed_at IS NOT NULL
+      AND university_id_verified_at IS NOT NULL
+      AND university_id_verified_by IS NOT NULL
+      AND returned_at IS NULL
+    );
 
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies

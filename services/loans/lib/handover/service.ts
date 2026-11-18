@@ -24,6 +24,18 @@ export interface HandoverOperation {
   /** Normalized checklist and its Equipment version: recovery never needs the browser. */
   conditions: HandoverConditionInput[];
   checklistVersion: string;
+  /**
+   * The confirmed reservation window seen at plan time. Confirmed dates must not
+   * change (PO decision); the final transaction refuses if they did, so the
+   * saved due date is always the confirmed end_at.
+   */
+  window: { startAt: string; endAt: string };
+  /**
+   * Evidence of the assistant's physical university-ID check, saved with the
+   * plan so recovery reuses the ORIGINAL verification (never re-asks). The
+   * verifier is the starting assistant; the time is result.universityIdVerifiedAt.
+   */
+  idVerifiedBy: string;
 }
 interface ReservationRow {
   id: string; item_id: string; borrower_id: string; lab_id: number;
@@ -35,6 +47,9 @@ const conflict = (message: string) => new LoansError(409, "handover_conflict", m
 const incomplete = () => new LoansError(503, "handover_incomplete", "The equipment is checked out but the handover is not finished. Use Finish interrupted handover to complete or undo it.");
 const starterOnly = () => conflict("Only the assistant who started this handover can finish or undo it. Ask them, or ask a lab manager to reconcile.");
 const COMPONENTS_CHANGED = "The equipment's component list changed. Reload the checklist and check it again.";
+const RESERVATION_CHANGED = "The reservation changed during handover. Reload and check it again.";
+const sameWindow = (row: ReservationRow, window: HandoverOperation["window"]) =>
+  row.start_at.toISOString() === window.startAt && row.end_at.toISOString() === window.endAt;
 const CHECKOUT_REASON = "Handed over after pickup checklist and student confirmation.";
 const UNDO_REASON = "Compensate failed handover record transaction.";
 
@@ -52,6 +67,9 @@ function validOperation(op: HandoverOperation, reservationId: string): boolean {
     && ["planned", "applied", "compensating", "compensated", "completed"].includes(op.state)
     && isHandoverOutcome(op.result) && op.result.reservationId === reservationId
     && typeof op.checklistVersion === "string" && /^[a-f0-9]{64}$/.test(op.checklistVersion)
+    && typeof op.idVerifiedBy === "string" && op.idVerifiedBy === op.actor
+    && !!op.window && typeof op.window.startAt === "string" && typeof op.window.endAt === "string"
+    && Number.isFinite(Date.parse(op.window.startAt)) && op.window.endAt === op.result.dueDate
     && Array.isArray(op.conditions) && op.conditions.length > 0 && op.conditions.every(row => !!row
       && (row.kitComponentId === null || typeof row.kitComponentId === "string")
       && row.checked === true && isConditionStatus(row.conditionStatus) && typeof row.notes === "string");
@@ -88,8 +106,8 @@ export function recoverHandover(reservationId: string, actor: UserIdentity, port
 
 /**
  * Request-driven handover Saga (same protocol as the reviewed return Saga):
- * 1. Student confirmation and checklist shape are enforced before ANY database
- *    or Equipment access.
+ * 1. Student confirmation, the assistant's university-ID check and checklist
+ *    shape are enforced before ANY database or Equipment access.
  * 2. Under a session advisory lock: SC eligibility on locked rows, borrower
  *    verified through Users, Equipment state and the component-list version;
  *    then COMMIT a durable plan (including the checklist) before Equipment
@@ -114,6 +132,10 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
     catch { throw new LoansError(400, "invalid_handover", "Invalid handover information. Check every component."); }
     // TC-3.7: without explicit student confirmation nothing is read or written.
     if (!input.studentConfirmed) throw new LoansError(400, "student_confirmation_required", "The student must confirm the handover before it can be completed.");
+    // PO decision (JS): the assistant physically checks the student's university
+    // ID. A separate, explicit tick; both are required. Nothing about the card
+    // (number, upload, photo) is collected.
+    if (!input.universityIdVerified) throw new LoansError(400, "id_verification_required", "Check the student's university ID card in person and tick the ID check before completing the handover.");
     // PO decision A1: a missing component may be handed over only when the
     // student's confirmation explicitly included it. Checked before any access.
     if (!confirmationCoversMissing(input)) throw new LoansError(400, "student_confirmation_required", "The student's confirmation must include every item recorded as missing. Ask the student to confirm again.");
@@ -197,6 +219,10 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
       // new student confirmation may replace it. Anything else must finish first.
       if (op.state !== "compensated") throw conflict("Another handover for this reservation is unfinished. Use Finish interrupted handover first.");
       op = null;
+    } else if (op?.state === "compensated" && !sameWindow(reservation, op.window)) {
+      // An undone plan for different reservation dates: plan again from the
+      // current confirmed reservation (Equipment holds nothing for it).
+      op = null;
     }
 
     if (!op || op.state === "compensated") {
@@ -204,7 +230,7 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
       // refuse safely before contacting Equipment.
       const now = new Date();
       await lockedEligibility(reservation, now);
-      await users.verifyBorrower(reservation.borrower_id);
+      await users.verifyBorrower(reservation.borrower_id, reservation.lab_id);
       const item = await remote(() => equipment.getItem(reservation.item_id, actor.lab_id));
       if (!item || item.id !== reservation.item_id || item.labId !== actor.lab_id) throw new LoansError(404, "equipment_missing", "Equipment item not found.");
       // PO decision A2 (confirmed by ZZ): an eligible confirmed reservation may
@@ -222,9 +248,12 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
         op = {
           fingerprint: fingerprint!, key: "handover:" + randomUUID(), attempt: 0, actor: actor.sub, previous: item.status, state: "planned",
           conditions: checklist, checklistVersion: version,
+          window: { startAt: reservation.start_at.toISOString(), endAt: reservation.end_at.toISOString() },
+          idVerifiedBy: actor.sub,
           result: {
             loanId: randomUUID(), reservationId, itemId: reservation.item_id, borrowerId: reservation.borrower_id,
-            borrowedAt: accepted, dueDate: reservation.end_at.toISOString(), studentConfirmedAt: accepted, status: "checked_out",
+            borrowedAt: accepted, dueDate: reservation.end_at.toISOString(), studentConfirmedAt: accepted,
+            universityIdVerifiedAt: accepted, status: "checked_out",
           },
         };
         await persist(op);
@@ -282,7 +311,7 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
     // 'applied' plan for Finish interrupted handover. This narrows, but does
     // not remove, the cross-service window before the local COMMIT below.
     let ineligible: LoansError | null = null;
-    try { await users.verifyBorrower(op.result.borrowerId); }
+    try { await users.verifyBorrower(op.result.borrowerId, reservation.lab_id); }
     catch (error) {
       if (error instanceof LoansError && error.code === "borrower_unverified") ineligible = error;
       else if (error instanceof LoansError && error.status === 403) throw error;
@@ -302,13 +331,15 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
         // Final submission: re-verify every SC rule on fresh, locked rows at the
         // server's current time before creating the loan.
         const fresh = await selectReservation();
-        if (!fresh || fresh.item_id !== itemId || fresh.borrower_id !== op.result.borrowerId) {
-          ineligible = conflict("The reservation changed during handover. Reload and check it again.");
+        // Authoritative reservation: same item, borrower, lab and CONFIRMED dates.
+        if (!fresh || fresh.item_id !== itemId || fresh.borrower_id !== op.result.borrowerId
+          || fresh.lab_id !== reservation.lab_id || !sameWindow(fresh, op.window)) {
+          ineligible = conflict(RESERVATION_CHANGED);
           throw ineligible;
         }
         try { await lockedEligibility(fresh, new Date()); }
         catch (error) { ineligible = error instanceof LoansError ? error : conflict("Only confirmed reservations can be handed over."); throw ineligible; }
-        await saveHandoverRecordsInTransaction(client, op.result, actor.lab_id, op.conditions, op.actor);
+        await saveHandoverRecordsInTransaction(client, op.result, actor.lab_id, op.conditions, op.actor, op.idVerifiedBy);
         op.state = "completed"; await persist(op);
         saved = true;
       } catch {

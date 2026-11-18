@@ -11,7 +11,7 @@ const checklist = (change: (row: Row, index: number) => object = row => row, mai
   [{ kitComponentId: null, checked: true, conditionStatus: "good", notes: "", ...main }, ...kitComponents.map((c, index) => change({ kitComponentId: c.id, checked: true, conditionStatus: "good", notes: "" }, index))];
 /** The version the page received from the gateway for Equipment's current components. */
 const versionNow = () => checklistVersionFor(kitItemId, fixture.components.map(r => ({ id: r.id, name: r.component_name, isActive: r.is_active, isRequired: r.is_required })));
-const confirmBody = (conditions: object[] = checklist(), studentConfirmed = true) => ({ studentConfirmed, checklistVersion: versionNow(), conditions });
+const confirmBody = (conditions: object[] = checklist(), studentConfirmed = true, universityIdVerified = true) => ({ universityIdVerified, studentConfirmed, checklistVersion: versionNow(), conditions });
 const post = (body: unknown, headers?: Record<string, string>) => POST(fixture.browser("POST", body, headers), fixture.context());
 const view = async () => (await GET(fixture.browser("GET"), fixture.context())).json();
 
@@ -177,6 +177,40 @@ describe("review fixes across the Web -> Loans -> Users/Equipment boundary", () 
     const response = await post(confirmBody());
     expect(response.status).toBe(409); expect((await response.json()).code).toBe("borrower_unverified");
     expect(fixture.history).toHaveLength(0); expect(fixture.db.state.loans).toHaveLength(0);
+  });
+
+  it.each([
+    ["a lab assistant", () => { fixture.borrowerRole = "lab_assistant"; }],
+    ["a professor", () => { fixture.borrowerRole = "professor"; }],
+  ])("PO (JS): a same-lab active %s as borrower is not verified and Loans refuses it", async (_name, setup) => {
+    setup();
+    expect((await view()).borrower.identity).toBe("not_verified");
+    const response = await post(confirmBody());
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "The borrower must be an active student in this lab, matching the reservation.", code: "borrower_unverified" });
+    expect(fixture.history).toHaveLength(0); expect(fixture.db.state.loans).toHaveLength(0);
+  });
+
+  it("PO (JS): a student of another lab is hidden by Users (404) and refused", async () => {
+    fixture.borrowerLab = 8;
+    expect((await view()).borrower.identity).toBe("not_verified");
+    const response = await post(confirmBody());
+    expect(response.status).toBe(409); expect((await response.json()).code).toBe("borrower_unverified");
+    expect(fixture.history).toHaveLength(0);
+  });
+
+  it("PO (JS): without the assistant's university-ID check the gateway relays 400 and nothing reaches Users or Equipment", async () => {
+    const response = await post(confirmBody(checklist(), true, false));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "id_verification_required", error: "Check the student's university ID card in person and tick the ID check before completing the handover." });
+    expect(fixture.requests.filter(r => r.service !== "loans")).toHaveLength(0); expect(fixture.db.state.loans).toHaveLength(0);
+  });
+
+  it("PO (JS): the outcome and details carry when the ID was checked; the loan stores who checked it", async () => {
+    const outcome = await (await post(confirmBody())).json();
+    expect(outcome.universityIdVerifiedAt).toEqual(expect.any(String));
+    expect((await view()).handover.universityIdVerifiedAt).toBe(outcome.universityIdVerifiedAt);
+    expect(fixture.db.state.loans[0]).toMatchObject({ university_id_verified_by: assistantId });
   });
 
   it("identity: Users unavailable -> 'unavailable' on the page and a retryable 503 from Loans, nothing changed", async () => {

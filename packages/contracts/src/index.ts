@@ -57,6 +57,7 @@ export {
   HANDOVER_NOTES_MAX_LENGTH,
   canonicalChecklist,
   isBorrowerVerification,
+  isEligibleBorrower,
   isChecklistComponentSource,
   isHandoverDetails,
   isHandoverOutcome,

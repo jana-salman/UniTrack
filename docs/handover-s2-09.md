@@ -2,9 +2,22 @@
 
 Kit checklist, condition and student confirmation. A lab assistant opens
 `/handover/[reservationId]`, ticks every row, records a condition (with optional
-notes), and the student ticks the confirmation box on the same screen. The
-handover is complete only after that confirmation and a successful Equipment
-checkout.
+notes), checks the student's university ID card in person and ticks the ID check,
+and the student ticks the confirmation box on the same screen. The handover is
+complete only after both ticks, a Users check that the borrower is an active
+student of the lab, and a successful Equipment checkout.
+
+## Final Product Owner requirements (confirmed by JS) — RESOLVED
+
+| Requirement | Implementation | Evidence |
+| --- | --- | --- |
+| Borrower must be an **active, same-lab Student** matching the confirmed reservation | Users `GET /profiles/:id/borrower` reports `id, full_name, role, lab_id, is_active` (staff-only, same lab, other labs 404). Loans applies one shared rule, `isEligibleBorrower` (contracts): id = the reservation's `borrower_id`, `lab_id` = the reservation's lab, `role = 'student'`, `is_active`. Checked before checkout and again after checkout before saving; the final transaction also re-reads the reservation (same borrower, item, lab and dates). Fails closed: not found / not a student / other lab / inactive / other id → 409 `borrower_unverified`; Users unreachable or malformed → 503 `borrower_unavailable` before checkout or `handover_incomplete` after it. The page shows the checklist only when the same rule passes. | Loans adapter tests (student, lab assistant, professor, lab manager, other lab, inactive, wrong id, missing lab, 404, 5xx, network); service tests (authoritative id+lab, ineligible before and after checkout); gateway tests (non-student, other lab); real PostgreSQL via the restricted Users role (lab assistant, other-lab student, inactive student). |
+| Assistant physically verifies the student's **university ID**; no student login or ID upload | Separate **University ID check (lab assistant)** checkbox, independent of the student's confirmation. Loans requires `universityIdVerified: true` (400 `id_verification_required` before any database, Users or Equipment access) **and** `studentConfirmed: true`. Evidence stored with minimal schema: `loans.university_id_verified_at` + `loans.university_id_verified_by` (the assistant). No ID number, upload, photo or student sign-in; unknown body fields are ignored and never stored. | Service, route, gateway and UI tests (ID tick missing, ID tick without confirmation, confirmation without ID tick, extra ID-number/photo fields not stored, no text/file inputs); migration static + `verify_C430PRJCT-40.sql` + PostgreSQL RLS tests. |
+| Durable, retryable recovery is sufficient; no worker; no cross-assistant expansion | Unchanged request-driven Saga and existing recovery (kept, not removed). The durable plan now also stores the ID-check evidence (`idVerifiedBy` + `universityIdVerifiedAt`) and the confirmed dates, so recovery reuses the ORIGINAL verification and checklist and never asks again. No background worker added; who may recover is unchanged. | Recovery by the starter and (for `applied`) another assistant keeps `university_id_verified_by` = original assistant (service + PostgreSQL); corrupted/missing evidence in a stored plan → `handover_state_uncertain`. |
+| UI clearly shows uncertain outcomes and prevents fresh submissions while unresolved | Outcomes are classified: **completed** (200), **failed** (4xx, `borrower_unavailable`, `handover_rolled_back`: nothing handed over, form stays editable) and **uncertain** (other 5xx such as `handover_state_uncertain`/`handover_incomplete`, network errors, unverifiable responses). After any unsuccessful attempt the page re-reads Loans: an unresolved operation replaces the form with **Handover not finished — outcome uncertain**, keeps the error visible, states that a new handover cannot start, and offers only **Finish interrupted handover** (the same operation). If no operation was saved (e.g. lost connection), the form is locked under **Outcome not confirmed** and only **Retry the same handover** (identical information, same key) is possible. Loans independently refuses a different submission while an operation is unfinished. | UI tests (uncertain with saved plan → only recovery, saved checklist used; lost connection → locked form, only identical retry; definite failure → no uncertain notice); service test (fresh submission and other assistant refused while `planned`; same information resumes the same key). |
+| Confirmed reservation dates cannot be edited | Handover never writes reservation dates (Loans has no grant to). The plan stores the confirmed `start_at`/`end_at`; the final loan transaction refuses with 409 "The reservation changed during handover" (guarded undo, no loan) if they differ, so the saved due date is always the confirmed `end_at`. Preventing the edit itself belongs to the reservation owner (see LJ coordination). | Service tests (start or end edited after checkout → undo, no loan; retry plans from the current reservation); real PostgreSQL (end date edited by another connection after checkout). |
+
+## Product Owner decisions (confirmed by ZZ)
 
 ## Product Owner decisions (confirmed by ZZ)
 
@@ -41,12 +54,14 @@ checkout.
 | --- | --- |
 | Lab assistants only (`lab_assistant`; managers, professors and students are denied) | Page guard, Web gateway (before any service call), Loans route + service |
 | Student must confirm (`studentConfirmed: true`) | Loans rejects with 400 `student_confirmation_required` before any database or Equipment access; RLS on new loans also requires `student_confirmed_at` |
+| Assistant checked the university ID in person (`universityIdVerified: true`, separate tick) | Loans rejects with 400 `id_verification_required` before any access; RLS on new loans requires `university_id_verified_at` and `university_id_verified_by` |
 | SC eligibility: reservation and equipment in the assistant's lab; `confirmed`; `start_at <= server now < end_at`; no active loan for the item; it is the ONLY confirmed reservation for the item whose window contains now | Loans, on locked rows: when the plan is made, before a new attempt after an undo, and again in the final loan transaction at the server's current time. A per-item transaction lock (`loans:handover:item:<id>`) serializes handovers of different reservations for one item. Failing at final submission undoes the checkout (ownership-guarded) and returns the failed rule as 409. |
 | Equipment status must be `reserved` or `available` (**PO decision A2**) | Loans (read from Equipment over HTTP); Equipment re-checks it under its row lock at checkout |
 | Missing items must be included in the student's confirmation (**PO decision A1**) | Page lists them in the confirmation box and clears confirmation on any edit; Loans requires `acknowledgedMissing` to match the missing rows |
 | Checklist = one **main-item** row (`kitComponentId: null`, the kit itself or the non-kit item, with its own explicit condition) **plus**, for kits, every **active** component exactly once (actual IDs); every row ticked; valid condition; notes ≤ 1000 chars | Loans, against Equipment's component list |
+| Confirmed reservation dates unchanged during the handover | Loans final transaction compares `start_at`/`end_at` with the plan; a difference is 409 "reservation changed" (guarded undo, no loan) |
 | Checklist must match what was shown: the page sends `checklistVersion` (SHA-256 of the canonical component list from Equipment) | Loans recomputes it from Equipment before checkout **and again after checkout**; a mismatch is 409 "component list changed" (after checkout: guarded undo, no records) |
-| Borrower identity verified through **Users** (`GET /profiles/:id/borrower`: same-lab, active) | Loans before checkout and again after checkout. Not found/inactive → 409 `borrower_unverified` (after checkout: guarded undo). Users unreachable → 503 `borrower_unavailable` before checkout (nothing changed) or `handover_incomplete` after checkout (durable plan kept for recovery). The page shows the checklist only when Users reports the borrower verified; a displayed name never counts. |
+| Borrower is an **active student of the reservation's lab** whose id is the reservation's `borrower_id`, verified through **Users** (`GET /profiles/:id/borrower`) | Loans before checkout and again after checkout. Not found / not a student / other lab / inactive → 409 `borrower_unverified` (after checkout: guarded undo). Users unreachable → 503 `borrower_unavailable` before checkout (nothing changed) or `handover_incomplete` after checkout (durable plan kept for recovery). The page shows the checklist only when Users reports the borrower verified; a displayed name never counts. |
 
 Condition labels → stored values: Good → `good`, Existing damage → `damaged`,
 Missing component → `missing`, Needs attention → `unknown`. "Ticked" means
@@ -70,15 +85,17 @@ test returns loans created by this handover.
   handover (if any) and `pending` (`{ state, startedAt, recoverableByYou }`). If
   Equipment components cannot be read the checklist is not shown.
 - Web `POST /api/handover/:reservationId` → body
-  `{ studentConfirmed, checklistVersion, conditions: [{ kitComponentId, checked, conditionStatus, notes }] }`;
-  returns `{ loanId, reservationId, itemId, borrowerId, borrowedAt, dueDate, studentConfirmedAt, status: "checked_out" }`.
+  `{ universityIdVerified, studentConfirmed, acknowledgedMissing, checklistVersion, conditions: [{ kitComponentId, checked, conditionStatus, notes }] }`;
+  returns `{ loanId, reservationId, itemId, borrowerId, borrowedAt, dueDate, studentConfirmedAt, universityIdVerifiedAt, status: "checked_out" }`.
 - Web `POST /api/handover/:reservationId/recover` (no body) → finish/undo an
   interrupted handover from its stored plan. Web `GET /api/handover` → unfinished
   handovers in the assistant's lab (no borrower or checklist data).
 - Loans `GET|POST /handover/:reservationId`, `POST /handover/:reservationId/recover`,
   `GET /handover` (signed `lab_assistant` user only).
 - **New Users endpoint** `GET /profiles/:id/borrower` (lab assistant / lab manager,
-  same lab only; returns `id, full_name, role, is_active`; other labs → 404).
+  same lab only; returns `id, full_name, role, lab_id, is_active`; other labs → 404).
+  Users reports facts; Loans and the gateway decide eligibility with the shared
+  `isEligibleBorrower` rule.
 
 ## Reliability (same protocol as the reviewed return Saga)
 
@@ -100,8 +117,12 @@ test returns loans created by this handover.
 5. Only an acknowledged rollback allows undo, guarded by Equipment operation
    ownership (`expectedOperationKey`). Uncertain COMMIT/ROLLBACK, lost undo
    responses or ownership conflicts are reported as
-   `handover_state_uncertain` and never compensated blindly. The UI then locks
-   the form and offers **Retry the same handover** only.
+   `handover_state_uncertain` and never compensated blindly. The page then
+   re-reads Loans and shows **Handover not finished — outcome uncertain** with
+   **Finish interrupted handover** (saved operation) or, when nothing was saved,
+   locks the form under **Outcome not confirmed** with **Retry the same
+   handover** only. A fresh submission is never possible while the outcome is
+   unresolved.
 
 ### Interrupted handovers (no silent orphaned checkouts)
 
@@ -116,11 +137,16 @@ the original browser, because the plan stores the checklist:
 | Undo confirmed | `compensated` | — | Nothing to finish; a new handover (new student confirmation) may start |
 
 The reservation page shows the state and a **Finish interrupted handover** button;
-every handover page lists the lab's other unfinished handovers. Recovery is still
-request-driven (no background worker, like Return): staff must open the page. A
-`planned`/`compensating` operation whose starting assistant is unavailable needs
-manual reconciliation by a lab manager — no tool exists for that yet. Loans never
-updates or deletes loans or condition records during handover.
+every handover page lists the lab's other unfinished handovers. Recovery is
+request-driven (no background worker, like Return): staff must open the page.
+Per the PO (JS), durable, retryable recovery is sufficient; no worker and no
+further cross-assistant recovery were added, and the existing recovery was kept.
+A `planned`/`compensating` operation whose starting assistant is unavailable
+still needs manual reconciliation by a lab manager (no tool; accepted scope).
+Recovery uses the plan's saved checklist, student confirmation time and
+university-ID evidence (`idVerifiedBy` = the starting assistant), never the
+browser. Loans never updates or deletes loans or condition records during
+handover.
 
 ### Compensation cannot overwrite a later status change
 
@@ -150,20 +176,27 @@ Apply **after 004 and 006**, by the database owner, in a controlled step. Not ru
 by the app. Additive and idempotent:
 
 - `loans.student_confirmed_at TIMESTAMPTZ` (nullable; existing loans stay NULL).
+- `loans.university_id_verified_at TIMESTAMPTZ` and
+  `loans.university_id_verified_by UUID REFERENCES profiles(id) ON DELETE
+  RESTRICT` (nullable; existing loans stay NULL), with CHECK
+  `loans_university_id_verification_pair` (both NULL or both set). Only who and
+  when — no ID number, upload or photo column.
 - `reservations.handover_operation JSONB` (nullable).
 - Column-level grants to `unitrack_loans_service`: `INSERT (id, item_id,
   borrower_id, reservation_id, lab_id, borrowed_at, due_date,
-  student_confirmed_at) ON loans` and `UPDATE (handover_operation) ON
+  student_confirmed_at, university_id_verified_at, university_id_verified_by) ON loans` and `UPDATE (handover_operation) ON
   reservations`. Migration 006 gave Loans no INSERT on `loans`, so handover could
   not work under 006 without this. Loans still cannot insert `returned_at` or
   `return_operation`, update reservation status, or update/delete condition
   records.
-- Trigger `loans_student_confirmation_immutable`: `student_confirmed_at` cannot be
-  added, changed or cleared after the loan row exists (006 gives Loans
+- Trigger `loans_student_confirmation_immutable`: `student_confirmed_at` and the
+  two university-ID columns cannot be added, changed or cleared after the loan
+  row exists (006 gives Loans
   table-level UPDATE on loans). Return's `returned_at`/`return_operation` updates
   are unaffected (verified as the restricted role).
 - Two RLS policies (`c430prjct_40_loans_handover_insert` requiring
-  `student_confirmed_at IS NOT NULL AND returned_at IS NULL`, and
+  `student_confirmed_at`, `university_id_verified_at` and
+  `university_id_verified_by` NOT NULL and `returned_at IS NULL`, and
   `c430prjct_40_reservations_handover_update`). Names avoid 006's
   `unitrack_*_service_*` pattern and grants are column-level, so
   `postflight_006_read_only.sql` still passes.
@@ -171,10 +204,59 @@ by the app. Additive and idempotent:
   and a NOTICE is printed. 006's `REVOKE ALL` also removes column grants, so
   **re-run this file after applying 006**.
 
+**Amended in place, not a follow-up migration.** The file exists only on this
+unmerged branch (checked: no other remote branch or `main` contains it), and it
+was never applied to shared Supabase by this work. Shared Supabase was not
+queried (prohibited), so the **database owner should confirm** with a read-only
+query that `loans.student_confirmed_at` does not exist there before applying.
+The amended file still upgrades any earlier copy safely: the new columns and
+CHECK are added if missing, the insert policy is upgraded with `ALTER POLICY`
+(nothing dropped), the trigger is replaced, grants are re-issued. This was
+exercised on a local database that had the earlier version applied and a real
+handover loan: the loan kept its values (ID-check columns NULL, nothing
+backfilled) and a second run was a no-op.
+
 Shared Supabase was not touched. Verified on disposable PostgreSQL via
 `database/local-test/run.ps1` (applies it twice, runs
 `verify_C430PRJCT-40.sql` and `services/loans/tests/postgres-handover.integration.test.ts`
 as the restricted service roles).
+
+## Reservation rules, `main`, and remaining cross-service races
+
+What `main` (merged into this branch at `3bf6f20`) implements for reservations:
+**no reservation writer at all** (no create, confirm, cancel or date-edit route in
+any service), **no overlap constraint** (`database/data-model.md`: "Preventing
+overlapping confirmed reservations will be implemented in Sprint 2"), no
+reservation lock, and no rule that confirmed dates cannot change (`reservations`
+has only `CHECK (end_at > start_at)`). No service role has INSERT/UPDATE on
+`reservations` except this card's `UPDATE (handover_operation)`.
+
+What this card enforces (all SC rules and duplicate-checkout protection kept):
+per-reservation session lock; per-item transaction lock
+`loans:handover:item:<item_id>`; SC eligibility on locked rows at plan time and
+in the final loan transaction at server time; Equipment `expectedStatus` +
+operation ownership under its row lock; `loans_one_active_per_item` and unique
+`loans.reservation_id`; the reservation's borrower, item, lab and confirmed
+dates re-read in the final transaction.
+
+Remaining races (honest limits; no distributed transaction exists):
+
+1. **Reservation writers are not serialized with handover.** A reservation
+   confirmed, created or re-dated by another writer *after* the final
+   transaction's eligibility count and *before* its COMMIT is not seen by it. The
+   final transaction holds `FOR UPDATE` on THIS reservation (so cancelling or
+   editing this reservation waits), but a different reservation for the same
+   item is only blocked if its writer takes the same per-item lock or a database
+   overlap rule exists. Today no such writer exists on `main`.
+2. **Confirmed dates** are protected by handover only for the duration of a
+   handover (final re-check). Preventing edits of confirmed dates must be done by
+   the reservation owner (trigger or API rule).
+3. **Users and Equipment checks are point-in-time HTTP reads.** A borrower
+   deactivated or a kit component changed between the post-checkout re-check and
+   the loan COMMIT is not detected (window of one local transaction).
+4. **Equipment and Loans commit separately.** A crash between Equipment checkout
+   and the loan COMMIT leaves an `applied` plan, visible and recoverable, never a
+   silent orphan; recovery is request-driven.
 
 ## Shared changes to coordinate
 
@@ -212,20 +294,17 @@ when it exits. Start Web normally. `-Action Teardown` removes everything.
 | Case | Result | Evidence (read-only queries on the local container) |
 |---|---|---|
 | TC-3.1 (re-run 2026-11-18, after the review fixes and A1/A2) | Pass | Reservation `…9921`: exactly **1** loan (borrower `…9902`, due date set, `student_confirmed_at` set, not returned); **6** `pickup` records = **1** main-item record (`kit_component_id` NULL) + **5** distinct records for the kit's 5 active components (Charger, Cable, Battery, Case, Tripod), all `good`, same lab, recorder set; item `checked_out`; plan state `completed`; 1 active loan on the item. |
+| TC-3.1 … TC-3.7 with the university-ID checkbox | **Pending** — needs a fresh `handover-manual.ps1 -Action Setup` (the earlier manual database predates the ID columns) | Automated coverage above; real-PostgreSQL suite passes with the ID check. |
 | TC-3.4, TC-3.5, TC-3.7 | Pass (before the review fixes) | Missing charger saved as `missing` with its note; existing damage saved as `damaged` with its note and no photo; without confirmation the reservation stayed reserved and no loan was saved. Since then covered by the automated A1 and confirmation tests above; not re-run in the browser. |
 
 Shared Supabase was not used; no shared migration was applied.
 
 ## Open questions
 
-- **Still open for JS — not resolved by the PO decisions above:** the identity
-  interpretation and the cross-service concurrency limits below.
-- **JS / PO (identity):** is verifying the reservation's borrower through Users
-  (exists, same lab, active) the intended "verify student identity", or must the
-  assistant also check something physically on screen (e.g. tick "student ID card
-  matches") or must the student authenticate? Not implemented without an answer;
-  no new authentication flow was invented. Also: must the borrower's role be
-  `student` (Users reports the role; Loans does not restrict it today)?
+- **Resolved by JS (final PO requirements):** the identity interpretation
+  (active same-lab student + physical ID check, no student login or upload),
+  recovery scope, uncertain-outcome UI and confirmed dates — see the table at
+  the top. The cross-service races above are **not** removed by these decisions.
 - **Equipment owner (component versioning):** the post-checkout component check
   narrows but cannot remove the window before the loan COMMIT (no distributed
   transaction). Equipment has no API that edits kit components today. If one is
@@ -238,12 +317,18 @@ Shared Supabase was not used; no shared migration was applied.
   unique `loans.reservation_id` already blocks a second handover. Does your card
   move Equipment to `reserved` when the pickup window starts? Handover accepts
   `reserved` or `available`.
-- **LJ / SC — reservation-lock contract (via JS):** the per-item lock only serializes
-  handovers. A reservation confirmed or created by another writer between the
-  final eligibility count and the loan COMMIT is not blocked. Either take the same
-  `pg_advisory_xact_lock(hashtextextended('loans:handover:item:' || item_id, 0))`
-  when confirming/creating reservations, or add a database rule preventing
-  overlapping confirmed reservations. (Cancelling THIS reservation is blocked by
-  the handover's row lock until COMMIT.)
+- **LJ (S2-01/S2-02, via JS) — reservation-owner changes still needed** (not
+  implemented here; S2-01/S2-02 not rewritten):
+  1. Prevent overlapping confirmed reservations for one item (database exclusion
+     constraint, or the same per-item lock below around the overlap check).
+  2. Take `pg_advisory_xact_lock(hashtextextended('loans:handover:item:' || item_id, 0))`
+     in the transaction that creates or confirms a reservation, so it serializes
+     with handover's final eligibility check.
+  3. Make `start_at`/`end_at` of a `confirmed` reservation immutable (e.g. a
+     `BEFORE UPDATE` trigger) and do not offer date edits for confirmed
+     reservations in the UI/API.
+  4. Keep `loans.reservation_id` unique and do not mark a reservation
+     `fulfilled`/`cancelled` while `handover_operation ->> 'state'` is
+     `planned`, `applied` or `compensating`.
 - **SN (custody):** future loan-update protection must still allow Loans to INSERT
   handover loans and UPDATE `reservations.handover_operation`.

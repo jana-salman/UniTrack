@@ -7,6 +7,7 @@ import {
   canonicalChecklist,
   isBorrowerVerification,
   isChecklistComponentSource,
+  isEligibleBorrower,
   isEquipmentItemSnapshot,
   isHandoverDetails,
   isHandoverOutcome,
@@ -50,7 +51,8 @@ export async function forwardHandover(request: Request, reservationId: string | 
       if (!isHandoverOutcome(outcome) || outcome.reservationId.toLowerCase() !== (reservationId ?? "").toLowerCase()) return invalidServiceResponse(identity.rid);
       return Response.json({
         loanId: outcome.loanId, reservationId: outcome.reservationId, itemId: outcome.itemId, borrowerId: outcome.borrowerId,
-        borrowedAt: outcome.borrowedAt, dueDate: outcome.dueDate, studentConfirmedAt: outcome.studentConfirmedAt, status: outcome.status,
+        borrowedAt: outcome.borrowedAt, dueDate: outcome.dueDate, studentConfirmedAt: outcome.studentConfirmedAt,
+        universityIdVerifiedAt: outcome.universityIdVerifiedAt, status: outcome.status,
       }, { headers: noStore(identity.rid) });
     }
 
@@ -77,9 +79,12 @@ export async function forwardHandover(request: Request, reservationId: string | 
     const itemData = isEquipmentItemSnapshot(itemPayload) && itemPayload.id === itemId && itemPayload.lab_id === identity.lab_id ? itemPayload : null;
     const componentData: ChecklistComponentSource[] | null = Array.isArray(componentPayload) && componentPayload.every(isChecklistComponentSource) ? componentPayload : null;
     const borrowerData = isBorrowerVerification(borrowerPayload) && borrowerPayload.id === details.reservation.borrower_id ? borrowerPayload : null;
-    // A name is display data only; identity is "verified" only when Users says
-    // the borrower is an active profile in this lab. 404 = not verifiable.
-    const identityState: BorrowerIdentityState = borrowerData ? (borrowerData.is_active ? "verified" : "not_verified") : borrower.status === 404 ? "not_verified" : "unavailable";
+    // A name is display data only. PO decision (JS): "verified" only when Users
+    // reports the reservation's borrower as an ACTIVE STUDENT of this lab.
+    // 404 = not verifiable. Loans re-checks the same rule on submit.
+    const identityState: BorrowerIdentityState = borrowerData
+      ? (isEligibleBorrower(borrowerData, details.reservation.borrower_id, details.reservation.lab_id) ? "verified" : "not_verified")
+      : borrower.status === 404 ? "not_verified" : "unavailable";
     const assetCode = itemData && typeof (itemData as unknown as Record<string, unknown>).asset_code === "string" ? (itemData as unknown as Record<string, string>).asset_code : null;
 
     const view: HandoverView = {
@@ -89,7 +94,8 @@ export async function forwardHandover(request: Request, reservationId: string | 
       },
       handover: details.handover ? {
         loanId: details.handover.loanId, borrowedAt: details.handover.borrowedAt, dueDate: details.handover.dueDate,
-        studentConfirmedAt: details.handover.studentConfirmedAt, returnedAt: details.handover.returnedAt,
+        studentConfirmedAt: details.handover.studentConfirmedAt, universityIdVerifiedAt: details.handover.universityIdVerifiedAt,
+        returnedAt: details.handover.returnedAt,
         pickupConditions: details.handover.pickupConditions.map(row => ({ id: row.id, kitComponentId: row.kit_component_id, conditionStatus: row.condition_status, notes: row.notes })),
       } : null,
       pending: details.pending ? { state: details.pending.state, startedAt: details.pending.startedAt, recoverableByYou: details.pending.recoverableByYou } : null,

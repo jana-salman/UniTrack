@@ -4,7 +4,7 @@
 // All rows below are synthetic and created by this file.
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { UserIdentity } from "@unitrack/contracts";
+import { isEligibleBorrower, type UserIdentity } from "@unitrack/contracts";
 import { EquipmentStatusConflictError, IdempotencyKeyConflictError, updateEquipmentStatus } from "../../equipment/lib/equipment-status-transaction";
 import type { EquipmentStatus, ReturnStatusChange } from "../lib/returns/equipment-port";
 import type { HandoverEquipmentPort } from "../lib/handover/equipment-port";
@@ -19,7 +19,7 @@ vi.mock("../lib/db", () => ({
 }));
 
 import { checklistVersionOf, confirmHandover, recoverHandover } from "../lib/handover/service";
-import { borrowerUnavailable, borrowerUnverified, type BorrowerPort } from "../lib/users-http";
+import { borrowerIneligible, borrowerUnavailable, borrowerUnverified, type BorrowerPort } from "../lib/users-http";
 import { getHandoverDetails } from "../lib/handover/queries";
 import { LoansError } from "../lib/errors";
 import { confirmReturn } from "../lib/returns/service";
@@ -30,9 +30,12 @@ const localDescribe = configuredDatabaseUrl ? describe.sequential : describe.ski
 
 const id = (suffix: string) => "00000000-0000-4000-8000-" + suffix.padStart(12, "0");
 const labId = 7201;
-const assistantId = id("901"), borrowerId = id("902"), inactiveBorrowerId = id("903"), otherAssistantId = id("904");
-const items = { tc31: id("911"), tc34: id("912"), tc35: id("913"), tc37: id("914"), outage: id("915"), laterChange: id("916"), laterAba: id("918"), overlap: id("917"), finalCancel: id("931"), finalOverlap: id("932"), inactive: id("933"), interrupted: id("934"), componentChange: id("935"), availableRace: id("936") };
-const reservations = { tc31: id("921"), tc34: id("922"), tc35: id("923"), tc37: id("924"), outage: id("925"), laterChange: id("926"), laterAba: id("929"), overlap: id("927"), finalCancel: id("941"), finalOverlap: id("942"), inactive: id("943"), interrupted: id("944"), componentChange: id("945"), availableRace: id("946") };
+const assistantId = id("901"), borrowerId = id("902"), inactiveBorrowerId = id("903"), otherAssistantId = id("904"), otherLabStudentId = id("905");
+const otherLabId = 7202;
+const items = { tc31: id("911"), tc34: id("912"), tc35: id("913"), tc37: id("914"), outage: id("915"), laterChange: id("916"), laterAba: id("918"), overlap: id("917"), finalCancel: id("931"), finalOverlap: id("932"), inactive: id("933"), interrupted: id("934"), componentChange: id("935"), availableRace: id("936"), nonStudent: id("951"), otherLab: id("952"), dateEdit: id("953"), noIdCheck: id("954") };
+const reservations = { tc31: id("921"), tc34: id("922"), tc35: id("923"), tc37: id("924"), outage: id("925"), laterChange: id("926"), laterAba: id("929"), overlap: id("927"), finalCancel: id("941"), finalOverlap: id("942"), inactive: id("943"), interrupted: id("944"), componentChange: id("945"), availableRace: id("946"), nonStudent: id("961"), otherLab: id("962"), dateEdit: id("963"), noIdCheck: id("964") };
+/** Reservation borrower per case (default: the active same-lab student). */
+const borrowerFor: Partial<Record<keyof typeof reservations, string>> = { inactive: inactiveBorrowerId, nonStudent: otherAssistantId, otherLab: otherLabStudentId };
 const overlapSecondReservation = id("928");
 const names = ["Charger", "Cable", "Battery", "Case", "Tripod"];
 const componentIds = (item: string) => names.map((_, index) => id(item.slice(-3) + "c" + index));
@@ -85,14 +88,16 @@ const equipment: HandoverEquipmentPort & { getComponents(): Promise<never[]> } =
 };
 
 // Users port backed by Users' real SQL under its restricted role (Loans itself
-// never reads profiles). Mirrors the Users endpoint: same lab and active.
+// never reads profiles). Users reports facts; the SAME shared rule as the HTTP
+// adapter decides (PO via JS: active student of the reservation's lab, same id).
 const users: BorrowerPort = {
-  async verifyBorrower(borrower) {
+  async verifyBorrower(borrower, reservationLab) {
     if (usersDown) throw borrowerUnavailable();
     const row = (await usersPool.query<{ id: string; full_name: string; role: string; lab_id: number; is_active: boolean }>(
       "SELECT id, full_name, role, lab_id, is_active FROM public.profiles WHERE id = $1", [borrower])).rows[0];
-    if (!row || row.lab_id !== labId || !row.is_active) throw borrowerUnverified();
-    return { id: row.id, fullName: row.full_name, role: row.role };
+    if (!row) throw borrowerUnverified();
+    if (!isEligibleBorrower(row, borrower, reservationLab)) throw borrowerIneligible();
+    return { id: row.id, fullName: row.full_name, role: "student", labId: row.lab_id };
   },
 };
 const ports = { equipment, users };
@@ -104,7 +109,8 @@ const kitChecklist = (item: string, change: (row: Record<string, unknown>, index
 async function submit(reservation: string, input: Record<string, unknown>, as: UserIdentity = actor) {
   const item = (await admin.query<{ item_id: string }>("select item_id from public.reservations where id = $1", [reservation])).rows[0].item_id;
   const checklistVersion = checklistVersionOf(item, await equipment.getKitComponents(item, labId));
-  return confirmHandover(reservation, { checklistVersion, ...input }, as, ports);
+  // The assistant's physical university-ID check is ticked unless a test overrides it.
+  return confirmHandover(reservation, { checklistVersion, universityIdVerified: true, ...input }, as, ports);
 }
 const itemStatus = async (item: string) => (await admin.query<{ status: string }>("select status from public.equipment_items where id = $1", [item])).rows[0].status;
 const loansFor = async (reservation: string) => (await admin.query("select * from public.loans where reservation_id = $1", [reservation])).rows;
@@ -119,13 +125,14 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     usersPool = restricted("unitrack_users_service");
     database.pool = loansPool;
     // Synthetic fixtures owned by this test file (fresh tmpfs container each run).
-    await admin.query("insert into auth.users (id) values ($1), ($2), ($3), ($4) on conflict do nothing", [assistantId, borrowerId, inactiveBorrowerId, otherAssistantId]);
-    await admin.query("insert into public.labs (id, code, name) overriding system value values ($1, 'S2-09-TEST', 'Disposable Handover Lab') on conflict do nothing", [labId]);
+    await admin.query("insert into auth.users (id) values ($1), ($2), ($3), ($4), ($5) on conflict do nothing", [assistantId, borrowerId, inactiveBorrowerId, otherAssistantId, otherLabStudentId]);
+    await admin.query("insert into public.labs (id, code, name) overriding system value values ($1, 'S2-09-TEST', 'Disposable Handover Lab'), ($2, 'S2-09-OTHER', 'Other Disposable Lab') on conflict do nothing", [labId, otherLabId]);
     await admin.query("insert into public.equipment_categories (id, name, description) overriding system value values (7201, 'S2-09 Kits', 'Synthetic') on conflict do nothing");
     await admin.query(`insert into public.profiles (id, full_name, university_email, role, lab_id) values
       ($1, 'Handover Assistant', 's209-assistant@lau.edu', 'lab_assistant', $3), ($2, 'Handover Student', 's209-student@lau.edu', 'student', $3),
       ($4, 'Inactive Student', 's209-inactive@lau.edu', 'student', $3), ($5, 'Second Assistant', 's209-assistant2@lau.edu', 'lab_assistant', $3) on conflict do nothing`, [assistantId, borrowerId, labId, inactiveBorrowerId, otherAssistantId]);
     await admin.query("update public.profiles set is_active = false where id = $1", [inactiveBorrowerId]);
+    await admin.query("insert into public.profiles (id, full_name, university_email, role, lab_id) values ($1, 'Other Lab Student', 's209-otherlab@lau.edu', 'student', $2) on conflict do nothing", [otherLabStudentId, otherLabId]);
     for (const [key, item] of Object.entries(items)) {
       const kit = key !== "tc35";
       const startStatus = key === "tc35" || key === "availableRace" ? "available" : "reserved";
@@ -138,7 +145,7 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
         }
       }
       await admin.query("insert into public.reservations (id, item_id, borrower_id, lab_id, start_at, end_at, status) values ($1, $2, $3, $4, now() - interval '1 hour', now() + interval '7 days', 'confirmed')",
-        [reservations[key as keyof typeof reservations], item, key === "inactive" ? inactiveBorrowerId : borrowerId, labId]);
+        [reservations[key as keyof typeof reservations], item, borrowerFor[key as keyof typeof reservations] ?? borrowerId, labId]);
     }
     // Overlapping confirmed reservation for the same item (overlap rules are the reservations card's job).
     await admin.query("insert into public.reservations (id, item_id, borrower_id, lab_id, start_at, end_at, status) values ($1, $2, $3, $4, now() - interval '1 hour', now() + interval '7 days', 'confirmed')",
@@ -160,6 +167,9 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     const [loan] = await loansFor(reservations.tc31);
     expect(loan).toMatchObject({ id: result.loanId, borrower_id: borrowerId, item_id: items.tc31, lab_id: labId, returned_at: null, return_operation: null });
     expect(loan.student_confirmed_at).toBeInstanceOf(Date);
+    // Minimal evidence of the assistant's physical university-ID check.
+    expect(loan.university_id_verified_by).toBe(assistantId);
+    expect(loan.university_id_verified_at.toISOString()).toBe(result.universityIdVerifiedAt);
     expect(loan.due_date.toISOString()).toBe(result.dueDate);
     const pickup = await pickupFor(result.loanId);
     expect(pickup).toHaveLength(6);
@@ -303,6 +313,10 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     const pickup = await pickupFor(result.loanId);
     expect(pickup).toHaveLength(6);
     expect(pickup.every(row => row.recorded_by === assistantId)).toBe(true);
+    // Recovery reused the ORIGINAL saved ID check (not the recovering assistant).
+    const [loan] = await loansFor(reservations.interrupted);
+    expect(loan.university_id_verified_by).toBe(assistantId);
+    expect(loan.university_id_verified_at.toISOString()).toBe(plan.result.universityIdVerifiedAt);
     expect(pickup.find(row => row.kit_component_id === componentIds(items.interrupted)[0])).toMatchObject({ condition_status: "missing", notes: "Charger not in the case" });
     expect((await admin.query("select count(*)::int as n from public.equipment_status_history where item_id = $1", [items.interrupted])).rows[0].n).toBe(1);
   });
@@ -333,8 +347,41 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     expect(history.rows.map(row => row.new_status)).toEqual(["under_maintenance"]);
   });
 
-  it("the student confirmation is immutable for the restricted Loans role; Return-style updates still work", async () => {
+  it.each([
+    ["a lab assistant (not a student)", "nonStudent"],
+    ["a student of another lab", "otherLab"],
+    ["an inactive student", "inactive"],
+  ] as const)("borrower eligibility (real Users data): %s is refused before any Equipment change", async (_name, key) => {
+    await expect(submit(reservations[key], { studentConfirmed: true, conditions: kitChecklist(items[key]) })).rejects.toMatchObject({ status: 409, code: "borrower_unverified" });
+    expect(await itemStatus(items[key])).toBe("reserved");
+    expect(await loansFor(reservations[key])).toHaveLength(0);
+    expect((await admin.query("select handover_operation from public.reservations where id = $1", [reservations[key]])).rows[0].handover_operation).toBeNull();
+    expect((await admin.query("select count(*)::int as n from public.equipment_status_history where item_id = $1", [items[key]])).rows[0].n).toBe(0);
+  });
+
+  it("no physical university-ID check: 400 and nothing is read or written; the ID check never replaces confirmation", async () => {
+    await expect(submit(reservations.noIdCheck, { universityIdVerified: false, studentConfirmed: true, conditions: kitChecklist(items.noIdCheck) })).rejects.toMatchObject({ status: 400, code: "id_verification_required" });
+    await expect(submit(reservations.noIdCheck, { studentConfirmed: false, conditions: kitChecklist(items.noIdCheck) })).rejects.toMatchObject({ status: 400, code: "student_confirmation_required" });
+    expect(await itemStatus(items.noIdCheck)).toBe("reserved");
+    expect(await loansFor(reservations.noIdCheck)).toHaveLength(0);
+    expect((await admin.query("select handover_operation from public.reservations where id = $1", [reservations.noIdCheck])).rows[0].handover_operation).toBeNull();
+  });
+
+  it("confirmed dates edited by another connection after checkout -> 409, Reserved restored, no loan", async () => {
+    hooks.afterApply = async () => { await admin.query("update public.reservations set end_at = end_at + interval '1 day' where id = $1", [reservations.dateEdit]); };
+    await expect(submit(reservations.dateEdit, { studentConfirmed: true, conditions: kitChecklist(items.dateEdit) }))
+      .rejects.toMatchObject({ status: 409, code: "handover_conflict", message: "The reservation changed during handover. Reload and check it again." });
+    expect(await itemStatus(items.dateEdit)).toBe("reserved");
+    expect(await loansFor(reservations.dateEdit)).toHaveLength(0);
+    const history = await admin.query<{ new_status: string }>("select new_status from public.equipment_status_history where item_id = $1 order by id", [items.dateEdit]);
+    expect(history.rows.map(row => row.new_status)).toEqual(["checked_out", "reserved"]);
+  });
+
+  it("the student confirmation and university-ID check are immutable for the restricted Loans role; Return-style updates still work", async () => {
     const [loan] = await loansFor(reservations.tc34);
+    expect(loan.university_id_verified_by).toBe(assistantId);
+    await expect(loansPool.query("update public.loans set university_id_verified_at = null, university_id_verified_by = null where id = $1", [loan.id])).rejects.toMatchObject({ code: "P0001" });
+    await expect(loansPool.query("update public.loans set university_id_verified_by = $2 where id = $1", [loan.id, otherAssistantId])).rejects.toMatchObject({ code: "P0001" });
     await expect(loansPool.query("update public.loans set student_confirmed_at = null where id = $1", [loan.id])).rejects.toMatchObject({ code: "P0001" });
     await expect(loansPool.query("update public.loans set return_operation = return_operation where id = $1", [loan.id])).resolves.toBeDefined();
   });
@@ -346,6 +393,8 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     await expect(loansPool.query("delete from public.loans where id = $1", [loan.id])).rejects.toMatchObject({ code: "42501" });
     await expect(loansPool.query("update public.reservations set status = 'cancelled' where id = $1", [reservations.tc34])).rejects.toMatchObject({ code: "42501" });
     await expect(loansPool.query("insert into public.loans (item_id, borrower_id, lab_id, due_date) values ($1, $2, $3, now() + interval '1 day')", [items.tc35, borrowerId, labId])).rejects.toMatchObject({ code: "42501" });
+    // RLS: a confirmed loan without the assistant's ID check is refused too.
+    await expect(loansPool.query("insert into public.loans (item_id, borrower_id, lab_id, due_date, student_confirmed_at) values ($1, $2, $3, now() + interval '1 day', now())", [items.tc35, borrowerId, labId])).rejects.toMatchObject({ code: "42501" });
     await expect(equipmentPool.query("select student_confirmed_at from public.loans")).rejects.toMatchObject({ code: "42501" });
   });
 });

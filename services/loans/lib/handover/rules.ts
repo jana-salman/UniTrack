@@ -17,6 +17,7 @@ export function validateHandoverInput(value: unknown): ConfirmHandoverInput {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new HandoverRuleError("Invalid handover information.");
   const body = value as Record<string, unknown>;
   if (body.studentConfirmed !== undefined && typeof body.studentConfirmed !== "boolean") throw new HandoverRuleError("Invalid student confirmation.");
+  if (body.universityIdVerified !== undefined && typeof body.universityIdVerified !== "boolean") throw new HandoverRuleError("Invalid university ID check.");
   const rows = body.conditions;
   if (!Array.isArray(rows) || rows.length === 0 || rows.length > HANDOVER_MAX_ROWS) throw new HandoverRuleError("Record every checklist row.");
   const seen = new Set<string | null>();
@@ -43,7 +44,7 @@ export function validateHandoverInput(value: unknown): ConfirmHandoverInput {
     || !acknowledged.every(id => id === null || isProfileId(id))) throw new HandoverRuleError("Invalid missing-item acknowledgement.");
   const acknowledgedMissing = [...new Set(acknowledged.map(id => (id === null ? null : id.toLowerCase())))]
     .sort((a, b) => { const left = a ?? "", right = b ?? ""; return left < right ? -1 : left > right ? 1 : 0; });
-  return { studentConfirmed: body.studentConfirmed === true, checklistVersion: body.checklistVersion, acknowledgedMissing, conditions };
+  return { universityIdVerified: body.universityIdVerified === true, studentConfirmed: body.studentConfirmed === true, checklistVersion: body.checklistVersion, acknowledgedMissing, conditions };
 }
 
 /**

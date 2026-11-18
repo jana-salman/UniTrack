@@ -12,13 +12,39 @@ BEGIN
     RAISE EXCEPTION 'S2-09 verification failed: reservations.handover_operation must be nullable jsonb';
   END IF;
 
-  IF EXISTS (SELECT 1 FROM public.loans WHERE student_confirmed_at IS NOT NULL)
+  IF (SELECT data_type || '/' || is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = 'university_id_verified_at')
+     IS DISTINCT FROM 'timestamp with time zone/YES'
+     OR (SELECT data_type || '/' || is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = 'university_id_verified_by')
+     IS DISTINCT FROM 'uuid/YES' THEN
+    RAISE EXCEPTION 'S2-09 verification failed: university ID check columns must be nullable timestamptz/uuid';
+  END IF;
+  -- Minimal evidence only: who and when. No ID number, upload or photo column.
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'loans'
+             AND column_name LIKE 'university\_id\_%' ESCAPE '\'
+             AND column_name NOT IN ('university_id_verified_at', 'university_id_verified_by')) THEN
+    RAISE EXCEPTION 'S2-09 verification failed: unexpected university ID data column';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'public.loans'::regclass
+                 AND conname = 'loans_university_id_verification_pair' AND contype = 'c' AND convalidated)
+     OR NOT EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+                 WHERE c.conrelid = 'public.loans'::regclass AND c.contype = 'f'
+                   AND c.confrelid = 'public.profiles'::regclass AND a.attname = 'university_id_verified_by'
+                   AND c.confdeltype = 'r') THEN
+    RAISE EXCEPTION 'S2-09 verification failed: university ID pair check or verifier foreign key missing';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM public.loans WHERE student_confirmed_at IS NOT NULL
+             OR university_id_verified_at IS NOT NULL OR university_id_verified_by IS NOT NULL)
      OR EXISTS (SELECT 1 FROM public.reservations WHERE handover_operation IS NOT NULL) THEN
     RAISE EXCEPTION 'S2-09 verification failed: existing rows were backfilled';
   END IF;
 
   -- Column-level least privilege for Loans.
   IF NOT has_column_privilege('unitrack_loans_service', 'public.loans', 'student_confirmed_at', 'INSERT')
+     OR NOT has_column_privilege('unitrack_loans_service', 'public.loans', 'university_id_verified_at', 'INSERT')
+     OR NOT has_column_privilege('unitrack_loans_service', 'public.loans', 'university_id_verified_by', 'INSERT')
      OR NOT has_column_privilege('unitrack_loans_service', 'public.loans', 'reservation_id', 'INSERT')
      OR has_column_privilege('unitrack_loans_service', 'public.loans', 'returned_at', 'INSERT')
      OR has_column_privilege('unitrack_loans_service', 'public.loans', 'return_operation', 'INSERT')
@@ -78,10 +104,24 @@ BEGIN
   END;
   BEGIN
     -- RLS: a service-created loan must carry student confirmation.
-    INSERT INTO public.loans (item_id, borrower_id, lab_id, due_date)
-    VALUES ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000002', 7001, now() + interval '1 day');
+    INSERT INTO public.loans (item_id, borrower_id, lab_id, due_date, university_id_verified_at, university_id_verified_by)
+    VALUES ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000002', 7001, now() + interval '1 day',
+            now(), '00000000-0000-4000-8000-000000000001');
     RAISE EXCEPTION 'S2-09 verification failed: Loans inserted an unconfirmed loan';
   EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    -- RLS: ... and the assistant's university-ID check (both fields).
+    INSERT INTO public.loans (item_id, borrower_id, lab_id, due_date, student_confirmed_at)
+    VALUES ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000002', 7001, now() + interval '1 day', now());
+    RAISE EXCEPTION 'S2-09 verification failed: Loans inserted a loan without the university ID check';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    INSERT INTO public.loans (item_id, borrower_id, lab_id, due_date, student_confirmed_at, university_id_verified_at)
+    VALUES ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000002', 7001, now() + interval '1 day', now(), now());
+    RAISE EXCEPTION 'S2-09 verification failed: Loans inserted a loan without the ID verifier';
+  EXCEPTION WHEN insufficient_privilege OR check_violation THEN NULL;
   END;
   BEGIN
     UPDATE public.reservations SET status = 'fulfilled' WHERE false;
@@ -109,9 +149,11 @@ END;
 $$;
 BEGIN;
 SET LOCAL ROLE unitrack_loans_service;
-INSERT INTO public.loans (id, item_id, borrower_id, lab_id, due_date, student_confirmed_at)
+INSERT INTO public.loans (id, item_id, borrower_id, lab_id, due_date, student_confirmed_at,
+                          university_id_verified_at, university_id_verified_by)
 VALUES ('00000000-0000-4000-8000-000000000498', '00000000-0000-4000-8000-000000000101',
-        '00000000-0000-4000-8000-000000000002', 7001, now() + interval '1 day', now());
+        '00000000-0000-4000-8000-000000000002', 7001, now() + interval '1 day', now(),
+        now(), '00000000-0000-4000-8000-000000000001');
 -- The existing Return workflow's updates still work on a handover loan.
 UPDATE public.loans SET return_operation = '{"state":"planned"}'::jsonb WHERE id = '00000000-0000-4000-8000-000000000498';
 UPDATE public.loans SET returned_at = now() + interval '1 second' WHERE id = '00000000-0000-4000-8000-000000000498';
@@ -130,6 +172,31 @@ BEGIN
     IF SQLERRM NOT LIKE 'loans.student_confirmed_at cannot be changed%' THEN RAISE; END IF;
   END;
   BEGIN
+    UPDATE public.loans SET university_id_verified_at = now() - interval '1 day' WHERE id = '00000000-0000-4000-8000-000000000498';
+    RAISE EXCEPTION 'S2-09 verification failed: a university ID check time was rewritten';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM NOT LIKE 'loans university ID verification cannot be changed%' THEN RAISE; END IF;
+  END;
+  BEGIN
+    UPDATE public.loans SET university_id_verified_by = '00000000-0000-4000-8000-000000000002' WHERE id = '00000000-0000-4000-8000-000000000498';
+    RAISE EXCEPTION 'S2-09 verification failed: a university ID verifier was rewritten';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM NOT LIKE 'loans university ID verification cannot be changed%' THEN RAISE; END IF;
+  END;
+  BEGIN
+    UPDATE public.loans SET university_id_verified_at = NULL, university_id_verified_by = NULL WHERE id = '00000000-0000-4000-8000-000000000498';
+    RAISE EXCEPTION 'S2-09 verification failed: a university ID check was cleared';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM NOT LIKE 'loans university ID verification cannot be changed%' THEN RAISE; END IF;
+  END;
+  BEGIN
+    UPDATE public.loans SET university_id_verified_at = now(), university_id_verified_by = '00000000-0000-4000-8000-000000000001'
+    WHERE id = '00000000-0000-4000-8000-000000000201';
+    RAISE EXCEPTION 'S2-09 verification failed: a legacy loan gained a university ID check';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM NOT LIKE 'loans university ID verification cannot be changed%' THEN RAISE; END IF;
+  END;
+  BEGIN
     -- A legacy (pre-S2-09) loan cannot gain a confirmation retroactively.
     UPDATE public.loans SET student_confirmed_at = now() WHERE id = '00000000-0000-4000-8000-000000000201';
     RAISE EXCEPTION 'S2-09 verification failed: a legacy loan gained a confirmation';
@@ -140,4 +207,19 @@ END;
 $$;
 ROLLBACK;
 
-SELECT 'PASS: C430PRJCT-40 handover columns, column grants, RLS and custody protections' AS result;
+-- The verification pair rule holds even for the table owner (rolled back).
+BEGIN;
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO public.loans (item_id, borrower_id, lab_id, due_date, university_id_verified_by)
+    VALUES ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000002', 7001, now() + interval '1 day',
+            '00000000-0000-4000-8000-000000000001');
+    RAISE EXCEPTION 'S2-09 verification failed: verifier saved without a verification time';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+END;
+$$;
+ROLLBACK;
+
+SELECT 'PASS: C430PRJCT-40 handover columns, ID-check evidence, column grants, RLS and custody protections' AS result;

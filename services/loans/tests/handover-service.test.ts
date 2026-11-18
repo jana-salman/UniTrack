@@ -9,7 +9,7 @@ const holder = vi.hoisted(() => ({ pool: null as unknown }));
 vi.mock("../lib/db", () => ({ getDatabasePool: () => holder.pool }));
 import { confirmHandover, recoverHandover } from "../lib/handover/service";
 import { getHandoverDetails, listInterruptedHandovers } from "../lib/handover/queries";
-import { borrowerUnavailable, borrowerUnverified } from "../lib/users-http";
+import { borrowerIneligible, borrowerUnavailable, borrowerUnverified } from "../lib/users-http";
 import { LoansError, uncertain } from "../lib/errors";
 
 let db: ReturnType<typeof handoverDatabase>;
@@ -39,8 +39,10 @@ const equipment = {
     return { changed };
   }),
 };
-// Users is the ONLY identity authority: a known, active, same-lab profile.
-const users = { verifyBorrower: vi.fn(async (id: string) => { if (id !== borrowerId) throw borrowerUnverified(); return { id, fullName: "Fixture Student", role: "student" }; }) };
+// Users is the ONLY identity authority (adapter applies the PO rule: active,
+// same-lab STUDENT matching the reservation's borrower_id).
+const verified = { id: borrowerId, fullName: "Fixture Student", role: "student" as const, labId };
+const users = { verifyBorrower: vi.fn(async (id: string, lab: number) => { if (id !== borrowerId) throw borrowerUnverified(); if (lab !== labId) throw borrowerIneligible(); return { ...verified, id }; }) };
 const ports = { equipment, users };
 beforeEach(() => {
   db = handoverDatabase(); holder.pool = db.pool; status = "reserved"; owner = null; components = structuredClone(kitComponents);
@@ -48,7 +50,7 @@ beforeEach(() => {
   equipment.getItem.mockClear(); equipment.getKitComponents.mockClear(); equipment.changeStatus.mockClear(); users.verifyBorrower.mockClear();
 });
 const versionNow = () => checklistVersionFor(kitItemId, components);
-const body = (conditions: unknown[] = goodChecklist(), studentConfirmed: unknown = true, checklistVersion: unknown = versionNow()) => ({ studentConfirmed, checklistVersion, conditions });
+const body = (conditions: unknown[] = goodChecklist(), studentConfirmed: unknown = true, checklistVersion: unknown = versionNow(), universityIdVerified: unknown = true) => ({ universityIdVerified, studentConfirmed, checklistVersion, conditions });
 const confirm = (value: unknown = body(), identity = actor, id = reservationId) => confirmHandover(id, value, identity, ports);
 const recover = (identity = actor) => recoverHandover(reservationId, identity, ports);
 const nothingSaved = () => { expect(db.state.loans).toHaveLength(0); expect(db.state.records).toHaveLength(0); };
@@ -109,7 +111,7 @@ describe("acceptance criteria", () => {
   });
 
   it.each([false, undefined, "true", 1])("TC-3.7: studentConfirmed=%s saves no loan, records or checkout and touches no service", async studentConfirmed => {
-    const value = studentConfirmed === undefined ? { checklistVersion: versionNow(), conditions: goodChecklist() } : body(goodChecklist(), studentConfirmed);
+    const value = studentConfirmed === undefined ? { universityIdVerified: true, checklistVersion: versionNow(), conditions: goodChecklist() } : body(goodChecklist(), studentConfirmed);
     await expect(confirm(value)).rejects.toMatchObject({ status: 400, code: studentConfirmed === false || studentConfirmed === undefined ? "student_confirmation_required" : "invalid_handover" });
     nothingSaved(); expect(status).toBe("reserved"); expect(db.sql).toHaveLength(0);
     expect(equipment.getItem).not.toHaveBeenCalled(); expect(equipment.changeStatus).not.toHaveBeenCalled(); expect(users.verifyBorrower).not.toHaveBeenCalled();
@@ -155,7 +157,7 @@ describe("server-side checklist validation", () => {
     nothingSaved(); expect(calls).toHaveLength(0); expect(status).toBe("reserved");
   });
   it.each([undefined, "", "not-a-version", "A".repeat(64)])("rejects a missing or malformed checklist version (%s)", async version => {
-    const value: Record<string, unknown> = { studentConfirmed: true, conditions: goodChecklist() };
+    const value: Record<string, unknown> = { universityIdVerified: true, studentConfirmed: true, conditions: goodChecklist() };
     if (version !== undefined) value.checklistVersion = version;
     await expect(confirm(value)).rejects.toMatchObject({ status: 400, code: "invalid_handover" }); expect(db.sql).toHaveLength(0);
   });
@@ -213,7 +215,7 @@ describe("eligibility and authorization", () => {
 describe("student identity verification through Users", () => {
   it("verifies the reservation's borrower (not any client value) before checkout and again before saving", async () => {
     await confirm({ ...body(), borrowerId: "7c9e6679-7425-40de-944b-e07fc1f900aa", borrowerName: "Someone Else" });
-    expect(users.verifyBorrower.mock.calls.map(c => c[0])).toEqual([borrowerId, borrowerId]);
+    expect(users.verifyBorrower.mock.calls).toEqual([[borrowerId, labId], [borrowerId, labId]]);
     expect(db.state.loans[0].borrower_id).toBe(borrowerId);
   });
   it("refuses an unknown or inactive borrower before any Equipment change", async () => {
@@ -228,13 +230,13 @@ describe("student identity verification through Users", () => {
     expect((await confirm()).status).toBe("checked_out");
   });
   it("a borrower deactivated after checkout: undo with ownership guard, 409, no loan", async () => {
-    users.verifyBorrower.mockResolvedValueOnce({ id: borrowerId, fullName: "x", role: "student" }).mockRejectedValueOnce(borrowerUnverified());
+    users.verifyBorrower.mockResolvedValueOnce(verified).mockRejectedValueOnce(borrowerUnverified());
     await expect(confirm()).rejects.toMatchObject({ status: 409, code: "borrower_unverified" });
     expect(calls[1]).toMatchObject({ idempotencyKey: expect.stringMatching(/:0:undo$/), expectedOperationKey: calls[0].idempotencyKey });
     expect(status).toBe("reserved"); nothingSaved(); expect(opState()).toBe("compensated");
   });
   it("Users unavailable after checkout: no false success, durable 'applied' plan, recovery completes later", async () => {
-    users.verifyBorrower.mockResolvedValueOnce({ id: borrowerId, fullName: "x", role: "student" }).mockRejectedValueOnce(borrowerUnavailable());
+    users.verifyBorrower.mockResolvedValueOnce(verified).mockRejectedValueOnce(borrowerUnavailable());
     await expect(confirm()).rejects.toMatchObject({ status: 503, code: "handover_incomplete" });
     expect(status).toBe("checked_out"); nothingSaved(); expect(opState()).toBe("applied");
     const result = await recover();
@@ -283,7 +285,7 @@ describe("interrupted handovers: durable recovery without the browser", () => {
     expect(await listInterruptedHandovers(labId, assistantId)).toEqual([]);
   });
   it("a confirmed checkout ('applied') can be finished by ANY same-lab assistant; records keep the original recorder", async () => {
-    users.verifyBorrower.mockResolvedValueOnce({ id: borrowerId, fullName: "x", role: "student" }).mockRejectedValueOnce(borrowerUnavailable());
+    users.verifyBorrower.mockResolvedValueOnce(verified).mockRejectedValueOnce(borrowerUnavailable());
     await expect(confirm()).rejects.toMatchObject({ code: "handover_incomplete" });
     expect((await getHandoverDetails(reservationId, labId, otherAssistant.sub))?.pending).toMatchObject({ state: "applied", recoverableByYou: true });
     await recoverHandover(reservationId, otherAssistant, ports);
@@ -296,7 +298,7 @@ describe("interrupted handovers: durable recovery without the browser", () => {
     expect(calls).toHaveLength(1);
   });
   it("another assistant finding a now-ineligible applied plan cannot undo; the starter's recovery undoes it", async () => {
-    users.verifyBorrower.mockResolvedValueOnce({ id: borrowerId, fullName: "x", role: "student" }).mockRejectedValueOnce(borrowerUnavailable());
+    users.verifyBorrower.mockResolvedValueOnce(verified).mockRejectedValueOnce(borrowerUnavailable());
     await expect(confirm()).rejects.toMatchObject({ code: "handover_incomplete" });
     db.state.reservation.status = "cancelled";
     await expect(recoverHandover(reservationId, otherAssistant, ports)).rejects.toMatchObject({ status: 409, message: "Only confirmed reservations can be handed over." });
@@ -306,7 +308,7 @@ describe("interrupted handovers: durable recovery without the browser", () => {
     await expect(recover()).rejects.toMatchObject({ message: "The interrupted handover was undone and the equipment restored. Start a new handover with the student present." });
   });
   it("blocks a different new checklist while an earlier one is unfinished, then allows it once that is undone", async () => {
-    users.verifyBorrower.mockResolvedValueOnce({ id: borrowerId, fullName: "x", role: "student" }).mockRejectedValueOnce(borrowerUnavailable());
+    users.verifyBorrower.mockResolvedValueOnce(verified).mockRejectedValueOnce(borrowerUnavailable());
     await expect(confirm()).rejects.toMatchObject({ code: "handover_incomplete" });
     const different = body(goodChecklist().map(r => r.kitComponentId === null ? { ...r, notes: "second attempt" } : r));
     await expect(confirm(different)).rejects.toMatchObject({ status: 409, message: "Another handover for this reservation is unfinished. Use Finish interrupted handover first." });
@@ -462,7 +464,7 @@ describe("SC eligibility rules, at plan time and independently at final submissi
   });
   it.each([
     ["reservation cancelled", () => { db.state.reservation.status = "cancelled"; }, "Only confirmed reservations can be handed over."],
-    ["window ended", () => { db.state.reservation.end_at = new Date(Date.now() - 1); }, "The reservation pickup window has ended."],
+    ["confirmed end date edited into the past", () => { db.state.reservation.end_at = new Date(Date.now() - 1); }, "The reservation changed during handover. Reload and check it again."],
     ["overlapping reservation confirmed", () => { db.state.otherReservations.push(overlapping()); }, "More than one reservation is eligible for this equipment right now. Ask staff to resolve the overlap."],
     ["another active loan created", () => { db.state.loans.push({ id: otherLoanId, item_id: kitItemId, borrower_id: borrowerId, reservation_id: null, lab_id: labId, borrowed_at: new Date(), due_date: new Date(Date.now() + 1e6), student_confirmed_at: null, returned_at: null }); }, "This equipment is already on loan."],
     ["borrower changed on the reservation", () => { db.state.reservation.borrower_id = "7c9e6679-7425-40de-944b-e07fc1f900cc"; }, "The reservation changed during handover. Reload and check it again."],
@@ -475,6 +477,14 @@ describe("SC eligibility rules, at plan time and independently at final submissi
     expect(opState()).toBe("compensated");
     // A retry is refused BEFORE contacting Equipment again (no checkout/undo churn).
     await expect(confirm()).rejects.toMatchObject({ status: 409 }); expect(calls).toHaveLength(2);
+  });
+  it("final submission re-verifies: the pickup window ends (time passes, dates unchanged) after checkout -> 409, undo, no loan", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      db.settings.beforeFinalCheck = () => { vi.setSystemTime(new Date(db.state.reservation.end_at.getTime() + 1)); };
+      await expect(confirm()).rejects.toMatchObject({ status: 409, message: "The reservation pickup window has ended." });
+      expect(calls.map(c => c.idempotencyKey.split(":").at(-1))).toEqual(["apply", "undo"]); expect(status).toBe("reserved"); nothingSaved();
+    } finally { vi.useRealTimers(); }
   });
   it("a retried plan whose lost checkout committed is still re-verified and undone if now ineligible", async () => {
     loss = true; await expect(confirm()).rejects.toMatchObject({ code: "handover_state_uncertain" });
@@ -560,5 +570,80 @@ describe("PO decision A2 (ZZ): eligible reservations may be handed over while Av
   it("a second eligible reservation for the same Available item blocks handover", async () => {
     db.state.otherReservations.push({ id: "7c9e6679-7425-40de-944b-e07fc1f900b1", item_id: kitItemId, status: "confirmed", start_at: new Date(Date.now() - 60_000), end_at: new Date(Date.now() + 3600_000) });
     await expect(confirm()).rejects.toMatchObject({ status: 409 }); expect(calls).toHaveLength(0);
+  });
+});
+
+describe("PO decisions (JS): borrower eligibility, physical university-ID check, recovery and confirmed dates", () => {
+  it.each([false, undefined, null])("no university-ID check (%s) -> 400 id_verification_required before any access", async idCheck => {
+    const value: Record<string, unknown> = body(); if (idCheck === undefined) delete value.universityIdVerified; else value.universityIdVerified = idCheck;
+    await expect(confirm(value)).rejects.toMatchObject(idCheck === null ? { status: 400, code: "invalid_handover" } : { status: 400, code: "id_verification_required", message: "Check the student's university ID card in person and tick the ID check before completing the handover." });
+    expect(db.sql).toHaveLength(0); expect(users.verifyBorrower).not.toHaveBeenCalled(); expect(equipment.getItem).not.toHaveBeenCalled(); nothingSaved();
+  });
+  it("the ID check never replaces the student's confirmation (both required)", async () => {
+    await expect(confirm(body(goodChecklist(), false, versionNow(), true))).rejects.toMatchObject({ code: "student_confirmation_required" });
+    await expect(confirm(body(goodChecklist(), "yes", versionNow(), true))).rejects.toMatchObject({ code: "invalid_handover" });
+    await expect(confirm(body(goodChecklist(), true, versionNow(), "true"))).rejects.toMatchObject({ code: "invalid_handover" });
+    expect(db.sql).toHaveLength(0); nothingSaved();
+  });
+  it("stores minimal evidence: who checked the ID (the assistant) and when; returned in the outcome and details", async () => {
+    const result = await confirm({ ...body(), universityIdNumber: "202012345", idPhoto: "data:image/png;base64,AAAA" });
+    expect(db.state.loans[0]).toMatchObject({ university_id_verified_by: assistantId, university_id_verified_at: new Date(result.universityIdVerifiedAt) });
+    expect(JSON.stringify(db.state)).not.toMatch(/202012345|base64/);
+    expect((await getHandoverDetails(reservationId, labId, assistantId))?.handover).toMatchObject({ universityIdVerifiedAt: result.universityIdVerifiedAt, studentConfirmedAt: result.studentConfirmedAt });
+  });
+  it("verifies the borrower against the AUTHORITATIVE reservation's borrower_id and lab, at plan time and at final submission", async () => {
+    await confirm({ ...body(), borrowerId: "7c9e6679-7425-40de-944b-e07fc1f900aa", labId: 99 });
+    expect(users.verifyBorrower.mock.calls).toEqual([[borrowerId, labId], [borrowerId, labId]]);
+  });
+  it("an ineligible borrower (not a student / other lab / inactive) is refused before checkout", async () => {
+    users.verifyBorrower.mockRejectedValueOnce(borrowerIneligible());
+    await expect(confirm()).rejects.toMatchObject({ status: 409, code: "borrower_unverified", message: "The borrower must be an active student in this lab, matching the reservation." });
+    expect(calls).toHaveLength(0); nothingSaved(); expect(db.state.reservation.handover_operation).toBeNull();
+  });
+  it("a borrower who becomes ineligible before final submission: guarded undo, no loan", async () => {
+    users.verifyBorrower.mockResolvedValueOnce(verified).mockRejectedValueOnce(borrowerIneligible());
+    await expect(confirm()).rejects.toMatchObject({ status: 409, code: "borrower_unverified" });
+    expect(calls.map(c => c.idempotencyKey.split(":").at(-1))).toEqual(["apply", "undo"]); expect(status).toBe("reserved"); nothingSaved();
+  });
+  it("recovery reuses the ORIGINAL saved ID check and checklist (no browser data), even when another assistant finishes", async () => {
+    const conditions = goodChecklist().map(row => row.kitComponentId === chargerId ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : row);
+    users.verifyBorrower.mockResolvedValueOnce(verified).mockRejectedValueOnce(borrowerUnavailable());
+    await expect(confirm({ ...body(conditions), acknowledgedMissing: [chargerId] })).rejects.toMatchObject({ code: "handover_incomplete" });
+    const op = db.state.reservation.handover_operation as { idVerifiedBy: string; result: { universityIdVerifiedAt: string } };
+    expect(op.idVerifiedBy).toBe(assistantId);
+    const result = await recoverHandover(reservationId, otherAssistant, ports);
+    expect(result.universityIdVerifiedAt).toBe(op.result.universityIdVerifiedAt);
+    expect(db.state.loans[0]).toMatchObject({ university_id_verified_by: assistantId, university_id_verified_at: new Date(op.result.universityIdVerifiedAt) });
+    expect(componentRow(chargerId)).toMatchObject({ condition_status: "missing", notes: "Charger not in the case" });
+  });
+  it("fails closed on a stored plan without its ID-check evidence or confirmed dates", async () => {
+    loss = true; await expect(confirm()).rejects.toThrow();
+    // The model replaces rows on rollback: always edit the CURRENT stored plan.
+    const op = () => db.state.reservation.handover_operation as Record<string, unknown>;
+    const by = op().idVerifiedBy; op().idVerifiedBy = otherAssistant.sub;
+    await expect(recover()).rejects.toMatchObject({ code: "handover_state_uncertain" });
+    op().idVerifiedBy = by; const window = op().window; delete op().window;
+    await expect(recover()).rejects.toMatchObject({ code: "handover_state_uncertain" });
+    op().window = window; expect((await recover()).status).toBe("checked_out");
+  });
+  it.each([
+    ["start", () => { db.state.reservation.start_at = new Date(db.state.reservation.start_at.getTime() - 60_000); }],
+    ["end (due date)", () => { db.state.reservation.end_at = new Date(db.state.reservation.end_at.getTime() + 86_400_000); }],
+  ])("confirmed %s date edited during handover -> 409 at final submission, guarded undo, no loan", async (_name, change) => {
+    db.settings.beforeFinalCheck = change;
+    await expect(confirm()).rejects.toMatchObject({ status: 409, message: "The reservation changed during handover. Reload and check it again." });
+    expect(calls.map(c => c.idempotencyKey.split(":").at(-1))).toEqual(["apply", "undo"]); expect(status).toBe("reserved"); nothingSaved();
+    // The undone plan belongs to the old dates; a retry plans afresh from the current reservation.
+    const result = await confirm();
+    expect(result.dueDate).toBe(db.state.reservation.end_at.toISOString()); expect(db.state.loans[0].due_date).toEqual(db.state.reservation.end_at);
+  });
+  it("uncertain outcome: an unresolved operation blocks a fresh submission and only the same attempt can resume", async () => {
+    loss = true; await expect(confirm()).rejects.toMatchObject({ status: 503, code: "handover_state_uncertain" });
+    expect((await getHandoverDetails(reservationId, labId, assistantId))?.pending).toMatchObject({ state: "planned" });
+    await expect(confirm(body(goodChecklist().map(r => r.kitComponentId === null ? { ...r, notes: "fresh attempt" } : r)))).rejects.toMatchObject({ status: 409, message: "Another handover for this reservation is unfinished. Use Finish interrupted handover first." });
+    await expect(confirm(body(), otherAssistant)).rejects.toMatchObject({ status: 409 });
+    expect(calls).toHaveLength(1);
+    const result = await confirm(); // the SAME information resumes the SAME key
+    expect(calls).toHaveLength(2); expect(calls[1]).toEqual(calls[0]); expect(result.status).toBe("checked_out"); expect(db.state.loans).toHaveLength(1);
   });
 });

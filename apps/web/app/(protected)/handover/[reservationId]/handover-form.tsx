@@ -9,6 +9,7 @@ import {
   type ConfirmHandoverInput,
   type HandoverOutcome,
 } from "@unitrack/contracts";
+import { classifyHandoverFailure } from "@/lib/handover-view";
 
 interface HandoverFormProps {
   reservationId: string;
@@ -19,11 +20,16 @@ interface HandoverFormProps {
   checklistVersion: string;
   borrowerName: string | null;
   onComplete: (outcome: HandoverOutcome) => void;
+  /**
+   * Called after every unsuccessful attempt with the message shown, so the page
+   * re-reads Loans state (an unresolved operation then replaces this form).
+   */
+  onSettled?: (message: string) => void;
 }
 
 const CONDITIONS = Object.keys(HANDOVER_CONDITION_LABELS) as ConditionStatus[];
 
-export default function HandoverForm({ reservationId, equipmentName, components, checklistVersion, borrowerName, onComplete }: HandoverFormProps) {
+export default function HandoverForm({ reservationId, equipmentName, components, checklistVersion, borrowerName, onComplete, onSettled }: HandoverFormProps) {
   // The main item (kit case or non-kit item) always gets its OWN row and
   // condition; kit components follow, rendered from Equipment's actual list.
   const rows = [
@@ -34,11 +40,15 @@ export default function HandoverForm({ reservationId, equipmentName, components,
   const [conditions, setConditions] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [studentConfirmed, setStudentConfirmed] = useState(false);
+  // PO decision (JS): the assistant checks the university ID card in person.
+  // Separate from the student's confirmation; nothing about the card is stored.
+  const [idVerified, setIdVerified] = useState(false);
   // Shown after the record changes under an existing confirmation.
   const [confirmationCleared, setConfirmationCleared] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  // After an uncertain result, only the SAME information may be resent.
+  // After an UNCERTAIN result, only the SAME information may be resent; a fresh
+  // submission is blocked until the outcome is resolved.
   const [retryPayload, setRetryPayload] = useState<ConfirmHandoverInput | null>(null);
   const student = borrowerName ?? "The student";
   // What the student is confirming (PO decision A1): every row recorded as
@@ -66,18 +76,23 @@ export default function HandoverForm({ reservationId, equipmentName, components,
       } catch {
         setRetryPayload(payload);
         setError("The connection was interrupted. Retry the same handover information.");
+        onSettled?.("The connection was interrupted. Retry the same handover information.");
         return;
       }
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) {
-        if (response.status >= 500) setRetryPayload(payload);
-        const message = (body as { error?: unknown } | null)?.error;
-        setError(typeof message === "string" ? message : "Unable to complete the handover.");
+        const { error: message, code } = (body ?? {}) as { error?: unknown; code?: unknown };
+        const kind = classifyHandoverFailure(response.status, code);
+        setRetryPayload(kind === "uncertain" ? payload : null);
+        const text = typeof message === "string" ? message : "Unable to complete the handover.";
+        setError(text);
+        onSettled?.(text);
         return;
       }
       if (!isHandoverOutcome(body) || body.reservationId.toLowerCase() !== reservationId.toLowerCase()) {
         setRetryPayload(payload);
         setError("The response could not be verified. Retry the same handover information.");
+        onSettled?.("The response could not be verified. Retry the same handover information.");
         return;
       }
       onComplete(body);
@@ -93,7 +108,9 @@ export default function HandoverForm({ reservationId, equipmentName, components,
     if (rows.some(row => !checked[row.key])) return setError("Tick every row after checking it.");
     if (rows.some(row => !CONDITIONS.includes(conditions[row.key] as ConditionStatus))) return setError("Choose a condition for every row.");
     if (!studentConfirmed) return setError("The student must confirm the handover before it can be completed.");
+    if (!idVerified) return setError("Check the student's university ID card in person and tick the ID check before completing the handover.");
     await send({
+      universityIdVerified: true,
       studentConfirmed: true,
       checklistVersion,
       acknowledgedMissing: missingRows.map(row => row.id),
@@ -149,6 +166,21 @@ export default function HandoverForm({ reservationId, equipmentName, components,
           </div>
         ))}
 
+        <div className="rounded-lg border border-slate-300 bg-white p-4">
+          <h2 className="font-semibold text-slate-950">University ID check (lab assistant)</h2>
+          <p className="mt-1 text-sm text-slate-700">Do not type, photograph or upload the card. Only that you checked it is recorded.</p>
+          <label className="mt-3 flex min-h-11 items-start gap-3 text-slate-900">
+            <input
+              type="checkbox"
+              name="university-id-verified"
+              checked={idVerified}
+              onChange={event => setIdVerified(event.target.checked)}
+              className="mt-0.5 h-5 w-5"
+            />
+            I checked {borrowerName ? `${borrowerName}'s` : "the student's"} university ID card in person and it matches the borrower of this reservation.
+          </label>
+        </div>
+
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
           <h2 className="font-semibold text-slate-950">Student confirmation</h2>
           <p className="mt-1 text-sm text-slate-700">Hand this screen to {borrowerName ?? "the student"} to read the checklist and confirm.</p>
@@ -190,14 +222,21 @@ export default function HandoverForm({ reservationId, equipmentName, components,
       </fieldset>
 
       {retryPayload && (
-        <button
-          type="button"
-          onClick={() => void send(retryPayload)}
-          disabled={submitting}
-          className="min-h-11 rounded-lg border border-blue-700 px-5 py-3 font-semibold text-blue-700 disabled:opacity-50"
-        >
-          Retry the same handover
-        </button>
+        <section role="status" aria-labelledby="handover-uncertain" className="rounded-lg border border-amber-300 bg-amber-50 p-4" data-testid="handover-uncertain">
+          <h2 id="handover-uncertain" className="font-semibold text-amber-950">Outcome not confirmed</h2>
+          <p className="mt-1 text-amber-900">
+            The handover may or may not have been recorded. Do not start a new handover or give out other equipment for this reservation.
+            Retry the same handover; it resumes the same attempt and never checks the item out twice.
+          </p>
+          <button
+            type="button"
+            onClick={() => void send(retryPayload)}
+            disabled={submitting}
+            className="mt-3 min-h-11 rounded-lg border border-blue-700 bg-white px-5 py-3 font-semibold text-blue-700 disabled:opacity-50"
+          >
+            Retry the same handover
+          </button>
+        </section>
       )}
 
       {error && <p role="alert" className="text-red-700">{error}</p>}

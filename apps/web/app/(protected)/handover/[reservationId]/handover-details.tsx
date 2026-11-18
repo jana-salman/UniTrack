@@ -33,6 +33,9 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
   const [interrupted, setInterrupted] = useState<InterruptedHandover[]>([]);
   const [recovering, setRecovering] = useState(false);
   const [recoveryError, setRecoveryError] = useState("");
+  // Message from the last unsuccessful submission, kept when an unresolved
+  // operation replaces the form after the page re-reads Loans state.
+  const [lastAttempt, setLastAttempt] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -97,9 +100,9 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
             <dt className="font-semibold">Borrower</dt>
             <dd>{borrower.name ?? "Borrower name unavailable"}</dd>
             <dd className="text-sm" data-testid="borrower-identity">
-              {borrower.identity === "verified" ? "Identity verified: active university profile in your lab."
-                : borrower.identity === "not_verified" ? "Identity not verified: no active university profile in your lab."
-                : "Identity cannot be checked right now."}
+              {borrower.identity === "verified" ? "Borrower verified: active student in your lab, matching this reservation. Check their university ID card in person."
+                : borrower.identity === "not_verified" ? "Borrower not verified: not an active student in your lab for this reservation."
+                : "Borrower cannot be checked right now."}
             </dd>
           </div>
           <div><dt className="font-semibold">Pickup from</dt><dd>{formatDate(reservation.startAt)}</dd></div>
@@ -113,6 +116,7 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
           <p className="mt-2 text-slate-700">Equipment status: {currentStatus}</p>
           <p className="mt-1 text-slate-700">Borrower: {borrower.name ?? "Borrower name unavailable"}</p>
           <p className="mt-1 text-slate-700">Due: {formatDate(handover.dueDate)}</p>
+          {handover.universityIdVerifiedAt && <p className="mt-1 text-slate-700">University ID checked in person: {formatDate(handover.universityIdVerifiedAt)}</p>}
           {handover.studentConfirmedAt && <p className="mt-1 text-slate-700">Student confirmed: {formatDate(handover.studentConfirmedAt)}</p>}
           <h3 className="mt-4 font-semibold text-slate-950">Condition at pickup</h3>
           <ul className="mt-2 space-y-2">
@@ -127,9 +131,10 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
         </section>
       ) : pending ? (
         <section aria-labelledby="handover-interrupted" className="rounded-xl border border-amber-300 bg-amber-50 p-5">
-          <h2 id="handover-interrupted" className="text-xl font-semibold text-amber-950">Handover not finished</h2>
+          <h2 id="handover-interrupted" className="text-xl font-semibold text-amber-950">Handover not finished — outcome uncertain</h2>
           <p className="mt-2 text-amber-900">{PENDING_TEXT[pending.state] ?? "A handover for this reservation is unfinished."} Started {formatDate(pending.startedAt)}.</p>
-          <p className="mt-1 text-sm text-amber-900">The saved checklist and the student&apos;s confirmation are used; nothing needs to be re-entered.</p>
+          {lastAttempt && <p role="alert" className="mt-2 text-red-700">{lastAttempt}</p>}
+          <p className="mt-1 text-sm text-amber-900">A new handover cannot be started for this reservation until this one is finished or undone. The saved checklist, university ID check and student&apos;s confirmation are used; nothing needs to be re-entered.</p>
           {pending.recoverableByYou ? (
             <button type="button" onClick={() => void finishInterrupted()} disabled={recovering}
               className="mt-3 min-h-11 rounded-lg bg-amber-700 px-5 py-3 font-semibold text-white disabled:opacity-50">
@@ -148,7 +153,7 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
         <p role="alert" className="text-red-700">
           {borrower.identity === "unavailable"
             ? "The borrower's identity cannot be checked right now, so the handover cannot continue. Reload to try again."
-            : "The borrower's university profile could not be verified, so handover is not allowed."}
+            : "The borrower must be an active student in this lab, matching the reservation."}
         </p>
       ) : (
         <HandoverForm
@@ -158,6 +163,7 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
           checklistVersion={checklistVersion}
           borrowerName={borrower.name}
           onComplete={result => { setOutcome(result); setReload(value => value + 1); }}
+          onSettled={message => { setLastAttempt(message); setReload(value => value + 1); }}
         />
       )}
 

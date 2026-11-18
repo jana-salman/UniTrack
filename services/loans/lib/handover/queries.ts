@@ -14,7 +14,7 @@ function recoverable(state: string, starter: string | null, actorId: string): bo
 }
 interface LoanRow {
   id: string; item_id: string; borrowed_at: Date; due_date: Date;
-  student_confirmed_at: Date | null; returned_at: Date | null;
+  student_confirmed_at: Date | null; university_id_verified_at: Date | null; returned_at: Date | null;
 }
 
 /** Same-lab reservation plus its completed handover, if any. No operation internals. */
@@ -32,7 +32,7 @@ export async function getHandoverDetails(reservationId: string, labId: number, a
   if (!reservation) return null;
 
   const loan = (await pool.query<LoanRow>(
-    `select id, item_id, borrowed_at, due_date, student_confirmed_at, returned_at
+    `select id, item_id, borrowed_at, due_date, student_confirmed_at, university_id_verified_at, returned_at
      from public.loans
      where reservation_id = $1 and lab_id = $2`,
     [reservation.id, labId],
@@ -55,6 +55,7 @@ export async function getHandoverDetails(reservationId: string, labId: number, a
     handover: loan ? {
       loanId: loan.id, borrowedAt: loan.borrowed_at.toISOString(), dueDate: loan.due_date.toISOString(),
       studentConfirmedAt: loan.student_confirmed_at?.toISOString() ?? null,
+      universityIdVerifiedAt: loan.university_id_verified_at?.toISOString() ?? null,
       returnedAt: loan.returned_at?.toISOString() ?? null,
       pickupConditions: pickup.map(row => ({ id: row.id, kit_component_id: row.kit_component_id, condition_status: row.condition_status, notes: row.notes })),
     } : null,

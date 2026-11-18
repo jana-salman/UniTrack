@@ -35,7 +35,7 @@ export const fixture = {
   components: componentRows(), itemName: "Five-component camera kit",
   requests: [] as { service: string; method: string; path: string; identity?: InternalIdentity }[],
   failEquipmentStatus: false, loseApplyResponse: false, failComponents: false,
-  borrowerActive: true, usersDown: false, usersDownAfterCheckout: false,
+  borrowerActive: true, borrowerRole: "student", borrowerLab: 7, usersDown: false, usersDownAfterCheckout: false,
   asRole(role: string) { mocks.profile.mockResolvedValue({ ...assistant, role }); },
   get profile() { return mocks.profile; },
   get equipmentQuery() { return mocks.equipmentQuery; },
@@ -110,13 +110,13 @@ beforeEach(() => {
   fixture.db = handoverDatabase(); mocks.loans = fixture.db.pool;
   fixture.status = "reserved"; fixture.owner = null; fixture.history = []; fixture.components = componentRows(); fixture.requests = [];
   fixture.failEquipmentStatus = false; fixture.loseApplyResponse = false; fixture.failComponents = false;
-  fixture.borrowerActive = true; fixture.usersDown = false; fixture.usersDownAfterCheckout = false;
+  fixture.borrowerActive = true; fixture.borrowerRole = "student"; fixture.borrowerLab = 7; fixture.usersDown = false; fixture.usersDownAfterCheckout = false;
   vi.stubEnv("INTERNAL_JWT_SECRET", secret); vi.stubEnv("LOANS_SERVICE_URL", loansUrl); vi.stubEnv("EQUIPMENT_SERVICE_URL", equipmentUrl); vi.stubEnv("USERS_SERVICE_URL", usersUrl);
   mocks.profile.mockReset().mockResolvedValue(assistant);
   // Users' profiles table: the signed-in assistant and the reservation's borrower.
   mocks.usersQuery.mockReset().mockImplementation(async (sql: string, values: unknown[] = []) => {
     if (sql.includes("ANY(")) return { rows: [{ id: borrowerId, full_name: borrowerName }] };
-    if (values[0] === borrowerId) return { rows: [{ id: borrowerId, full_name: borrowerName, university_email: "student@mail.aub.edu", role: "student", lab_id: 7, is_active: fixture.borrowerActive }] };
+    if (values[0] === borrowerId) return { rows: [{ id: borrowerId, full_name: borrowerName, university_email: "student@mail.aub.edu", role: fixture.borrowerRole, lab_id: fixture.borrowerLab, is_active: fixture.borrowerActive }] };
     return { rows: [assistant] };
   });
   let snapshot: { status: string; owner: string | null; history: StatusHistory[] };

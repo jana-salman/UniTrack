@@ -19,10 +19,13 @@ async function call(id: string, identity: Record<string, unknown> | null = { kin
   return GET(new Request("http://users.test/profiles/" + id + "/borrower", { headers }), { params: Promise.resolve({ id }) } as never);
 }
 
-it("returns only id, name, role and active status for a same-lab borrower", async () => {
+it("returns only id, name, role, lab and active status for a same-lab borrower", async () => {
   const response = await call(studentId);
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ id: studentId, full_name: "Name 2", role: "student", is_active: true });
+  expect(await response.json()).toEqual({ id: studentId, full_name: "Name 2", role: "student", lab_id: 7, is_active: true });
+});
+it("reports a same-lab non-student's real role (Loans refuses it)", async () => {
+  expect(await (await call(assistantId)).json()).toMatchObject({ id: assistantId, role: "lab_assistant", lab_id: 7 });
 });
 it("reports an inactive borrower as inactive (Loans decides to refuse)", async () => {
   db.rows.set(studentId, profile(studentId, "student", 7, false));

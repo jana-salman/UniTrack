@@ -39,6 +39,12 @@ export interface HandoverConditionInput {
   notes?: string;
 }
 export interface ConfirmHandoverInput {
+  /**
+   * PO decision (JS): the assistant physically checked the student's university
+   * ID card against the reservation's borrower. Separate from the student's
+   * confirmation; both are required. No ID number, upload or photo is collected.
+   */
+  universityIdVerified: boolean;
   studentConfirmed: boolean;
   /**
    * PO decision A1: rows recorded as missing (kitComponentId, null = main item)
@@ -70,10 +76,19 @@ export function isChecklistComponentSource(value: unknown): value is ChecklistCo
 }
 
 /** Users GET /profiles/:id/borrower: same-lab, staff-only identity status. */
-export interface BorrowerVerification { id: string; full_name: string; role: string; is_active: boolean }
+export interface BorrowerVerification { id: string; full_name: string; role: string; lab_id: number; is_active: boolean }
 export function isBorrowerVerification(value: unknown): value is BorrowerVerification {
   return isRecord(value) && isUuid(value.id) && typeof value.full_name === "string"
-    && typeof value.role === "string" && typeof value.is_active === "boolean";
+    && typeof value.role === "string" && Number.isSafeInteger(value.lab_id) && (value.lab_id as number) > 0
+    && typeof value.is_active === "boolean";
+}
+/**
+ * PO decision (JS): the borrower must be an ACTIVE STUDENT of the reservation's
+ * lab whose profile id is the reservation's borrower_id.
+ */
+export function isEligibleBorrower(value: BorrowerVerification, borrowerId: string, labId: number): boolean {
+  return value.id.toLowerCase() === borrowerId.toLowerCase() && value.lab_id === labId
+    && value.role === "student" && value.is_active === true;
 }
 
 export interface HandoverReservationWire {
@@ -90,6 +105,7 @@ export interface CompletedHandoverWire {
   borrowedAt: string;
   dueDate: string;
   studentConfirmedAt: string | null;
+  universityIdVerifiedAt: string | null;
   returnedAt: string | null;
   pickupConditions: PickupCondition[];
 }
@@ -115,6 +131,8 @@ export interface HandoverOutcome {
   borrowedAt: string;
   dueDate: string;
   studentConfirmedAt: string;
+  /** When the assistant recorded the physical university-ID check. */
+  universityIdVerifiedAt: string;
   status: "checked_out";
 }
 
@@ -136,6 +154,7 @@ export function isHandoverDetails(value: unknown): value is HandoverDetails {
   const h = value.handover;
   return isRecord(h) && isUuid(h.loanId) && isDateString(h.borrowedAt) && isDateString(h.dueDate)
     && (h.studentConfirmedAt === null || isDateString(h.studentConfirmedAt))
+    && (h.universityIdVerifiedAt === null || isDateString(h.universityIdVerifiedAt))
     && (h.returnedAt === null || isDateString(h.returnedAt))
     && Array.isArray(h.pickupConditions) && h.pickupConditions.every(isPickupCondition);
 }
@@ -154,7 +173,7 @@ export function isHandoverOutcome(value: unknown): value is HandoverOutcome {
   return isRecord(value) && isUuid(value.loanId) && isUuid(value.reservationId)
     && isUuid(value.itemId) && isUuid(value.borrowerId)
     && isDateString(value.borrowedAt) && isDateString(value.dueDate)
-    && isDateString(value.studentConfirmedAt) && value.status === "checked_out";
+    && isDateString(value.studentConfirmedAt) && isDateString(value.universityIdVerifiedAt) && value.status === "checked_out";
 }
 
 // Approved handover wire vocabulary; merged into LOANS_ERROR_CONTRACT.
@@ -162,6 +181,8 @@ export const HANDOVER_ERROR_MESSAGES = [
   "Invalid reservation ID.", "Reservation not found.",
   "Invalid handover information. Check every component.",
   "The student must confirm the handover before it can be completed.",
+  "Check the student's university ID card in person and tick the ID check before completing the handover.",
+  "The borrower must be an active student in this lab, matching the reservation.",
   "The student's confirmation must include every item recorded as missing. Ask the student to confirm again.",
   "Only confirmed reservations can be handed over.",
   "The reservation pickup window has not started.",
@@ -192,7 +213,7 @@ export const HANDOVER_ERROR_MESSAGES = [
 ] as const;
 export const HANDOVER_ERROR_CODES = [
   "invalid_reservation", "reservation_not_found", "invalid_handover",
-  "student_confirmation_required", "handover_conflict",
+  "student_confirmation_required", "id_verification_required", "handover_conflict",
   "handover_state_uncertain", "handover_rolled_back",
   "borrower_unverified", "borrower_unavailable", "handover_incomplete", "handover_not_pending",
 ] as const;

@@ -20,7 +20,7 @@ let borrowerResponse: () => Response;
 const fetchCalls: { url: string; method: string; key: string | null; body: unknown }[] = [];
 beforeEach(() => {
   db = handoverDatabase(); holder.pool = db.pool; equipmentStatus = "reserved"; fetchCalls.length = 0;
-  borrowerResponse = () => Response.json({ id: borrowerId, full_name: "Fixture Student", role: "student", is_active: true });
+  borrowerResponse = () => Response.json({ id: borrowerId, full_name: "Fixture Student", role: "student", lab_id: labId, is_active: true });
   vi.stubEnv("INTERNAL_JWT_SECRET", secret); vi.stubEnv("EQUIPMENT_SERVICE_URL", "http://equipment.test"); vi.stubEnv("USERS_SERVICE_URL", "http://users.test");
   // Equipment over fetch: item, components and keyed status change wire shapes.
   vi.stubGlobal("fetch", vi.fn(async (url: URL, init: RequestInit) => {
@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 const context = (id = reservationId) => ({ params: Promise.resolve({ reservationId: id }) });
-const valid = () => ({ studentConfirmed: true, checklistVersion: checklistVersionFor(kitItemId, kitComponents), conditions: goodChecklist() });
+const valid = () => ({ universityIdVerified: true, studentConfirmed: true, checklistVersion: checklistVersionFor(kitItemId, kitComponents), conditions: goodChecklist() });
 async function request(method: "GET" | "POST", identity: UserIdentity | null = assistant, value?: unknown, id = reservationId) {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (identity) headers.Authorization = "Bearer " + await signInternalToken(identity, secret);
@@ -78,6 +78,18 @@ describe("Loans /handover/:reservationId", () => {
     expect(await response.json()).toEqual({ error: "The student must confirm the handover before it can be completed.", code: "student_confirmation_required" });
     expect(db.sql).toHaveLength(0); expect(fetchCalls).toHaveLength(0); expect(equipmentStatus).toBe("reserved");
   });
+  it("PO (JS): no physical university-ID check -> 400 before any database, Users or Equipment access", async () => {
+    const response = await POST(await request("POST", assistant, { ...valid(), universityIdVerified: false }), context());
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Check the student's university ID card in person and tick the ID check before completing the handover.", code: "id_verification_required" });
+    expect(db.sql).toHaveLength(0); expect(fetchCalls).toHaveLength(0);
+  });
+  it("PO (JS): no ID number, upload or photo is accepted or stored; only who/when", async () => {
+    const response = await POST(await request("POST", assistant, { ...valid(), universityIdNumber: "202012345", idPhoto: "data:image/png;base64,AAAA" }), context());
+    expect(response.status).toBe(200);
+    expect(JSON.stringify(db.state)).not.toMatch(/202012345|base64/);
+    expect(db.state.loans[0]).toMatchObject({ university_id_verified_by: assistantId, university_id_verified_at: expect.any(Date) });
+  });
   it("reports Equipment outage as uncertain without a loan, then completes on retry", async () => {
     const base = vi.mocked(fetch).getMockImplementation()!;
     let equipmentDown = true;
@@ -93,7 +105,7 @@ describe("Loans /handover/:reservationId", () => {
 describe("Loans recovery and interrupted list routes", () => {
   it("lists an interrupted handover and finishes it through /recover without any checklist in the request", async () => {
     let usersUp = true;
-    borrowerResponse = () => usersUp ? Response.json({ id: borrowerId, full_name: "Fixture Student", role: "student", is_active: true }) : new Response("down", { status: 503 });
+    borrowerResponse = () => usersUp ? Response.json({ id: borrowerId, full_name: "Fixture Student", role: "student", lab_id: labId, is_active: true }) : new Response("down", { status: 503 });
     const base = vi.mocked(fetch).getMockImplementation()!;
     // Users goes down right after checkout: durable 'applied' plan, honest 503.
     vi.mocked(fetch).mockImplementation(async (url, init) => {
@@ -119,16 +131,21 @@ describe("Loans recovery and interrupted list routes", () => {
 });
 
 describe("Loans -> Users borrower verification adapter", () => {
-  const verify = () => usersHttp(assistant).verifyBorrower(borrowerId);
+  const verify = () => usersHttp(assistant).verifyBorrower(borrowerId, labId);
   it("calls only the configured Users origin with a signed assistant token", async () => {
-    expect(await verify()).toEqual({ id: borrowerId, fullName: "Fixture Student", role: "student" });
+    expect(await verify()).toEqual({ id: borrowerId, fullName: "Fixture Student", role: "student", labId });
     expect(fetchCalls).toEqual([expect.objectContaining({ url: "/profiles/" + borrowerId + "/borrower", method: "GET" })]);
   });
   it.each([
     ["not found", () => new Response("{}", { status: 404 }), 409, "borrower_unverified"],
-    ["inactive", () => Response.json({ id: borrowerId, full_name: "x", role: "student", is_active: false }), 409, "borrower_unverified"],
-    ["a different profile", () => Response.json({ id: kitItemId, full_name: "x", role: "student", is_active: true }), 409, "borrower_unverified"],
+    ["inactive", () => Response.json({ id: borrowerId, full_name: "x", role: "student", lab_id: labId, is_active: false }), 409, "borrower_unverified"],
+    ["a different profile (wrong borrower)", () => Response.json({ id: kitItemId, full_name: "x", role: "student", lab_id: labId, is_active: true }), 409, "borrower_unverified"],
+    ["another lab", () => Response.json({ id: borrowerId, full_name: "x", role: "student", lab_id: labId + 1, is_active: true }), 409, "borrower_unverified"],
+    ["a lab assistant (not a student)", () => Response.json({ id: borrowerId, full_name: "x", role: "lab_assistant", lab_id: labId, is_active: true }), 409, "borrower_unverified"],
+    ["a professor (not a student)", () => Response.json({ id: borrowerId, full_name: "x", role: "professor", lab_id: labId, is_active: true }), 409, "borrower_unverified"],
+    ["a lab manager (not a student)", () => Response.json({ id: borrowerId, full_name: "x", role: "lab_manager", lab_id: labId, is_active: true }), 409, "borrower_unverified"],
     ["malformed", () => Response.json({ id: borrowerId }), 503, "borrower_unavailable"],
+    ["without a lab", () => Response.json({ id: borrowerId, full_name: "x", role: "student", is_active: true }), 503, "borrower_unavailable"],
     ["a 5xx", () => new Response("down", { status: 503 }), 503, "borrower_unavailable"],
     ["non-JSON success", () => new Response("ok", { status: 200 }), 503, "borrower_unavailable"],
     ["rejected staff identity", () => new Response("{}", { status: 403 }), 403, "forbidden"],
@@ -141,6 +158,13 @@ describe("Loans -> Users borrower verification adapter", () => {
     await expect(verify()).rejects.toMatchObject({ status: 503, code: "borrower_unavailable" });
     vi.stubEnv("USERS_SERVICE_URL", "");
     await expect(verify()).rejects.toMatchObject({ status: 503, code: "loans_configuration" });
+  });
+  it("a non-student borrower is refused through the route before any Equipment change", async () => {
+    borrowerResponse = () => Response.json({ id: borrowerId, full_name: "x", role: "lab_assistant", lab_id: labId, is_active: true });
+    const response = await POST(await request("POST", assistant, valid()), context());
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "The borrower must be an active student in this lab, matching the reservation.", code: "borrower_unverified" });
+    expect(fetchCalls.some(c => c.method === "PATCH")).toBe(false); expect(db.state.loans).toHaveLength(0);
   });
   it("an unconfirmed POST never reaches Users", async () => {
     await POST(await request("POST", assistant, { ...valid(), studentConfirmed: false }), context());
