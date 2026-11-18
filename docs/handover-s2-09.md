@@ -207,6 +207,15 @@ script restores the terminal's `DATABASE_URL`/`LOANS_DATABASE_SESSION_AFFINITY`
 when it exits. Start Web normally. `-Action Teardown` removes everything.
 `.env.local` files are never read or edited.
 
+### Browser acceptance results (disposable database only)
+
+| Case | Result | Evidence (read-only queries on the local container) |
+|---|---|---|
+| TC-3.1 (re-run 2026-11-18, after the review fixes and A1/A2) | Pass | Reservation `…9921`: exactly **1** loan (borrower `…9902`, due date set, `student_confirmed_at` set, not returned); **6** `pickup` records = **1** main-item record (`kit_component_id` NULL) + **5** distinct records for the kit's 5 active components (Charger, Cable, Battery, Case, Tripod), all `good`, same lab, recorder set; item `checked_out`; plan state `completed`; 1 active loan on the item. |
+| TC-3.4, TC-3.5, TC-3.7 | Pass (before the review fixes) | Missing charger saved as `missing` with its note; existing damage saved as `damaged` with its note and no photo; without confirmation the reservation stayed reserved and no loan was saved. Since then covered by the automated A1 and confirmation tests above; not re-run in the browser. |
+
+Shared Supabase was not used; no shared migration was applied.
+
 ## Open questions
 
 - **Still open for JS — not resolved by the PO decisions above:** the identity
