@@ -59,7 +59,7 @@ async function changeStatus(
   }
 }
 
-localDescribe("migrations 003-005 on disposable PostgreSQL", () => {
+localDescribe("migrations 003-006 and S2-02 on disposable PostgreSQL", () => {
   beforeAll(async () => {
     if (configuredDatabaseUrl !== expectedDatabaseUrl) {
       throw new Error(
@@ -296,5 +296,75 @@ localDescribe("migrations 003-005 on disposable PostgreSQL", () => {
       [loanId, returnItemId],
     );
     expect(replayCounts.rows[0]).toEqual({ return_records: 1, keyed_receipts: 1 });
+  });
+  it("prevents overlapping confirmed reservations for the same equipment item", async () => {
+    const client = await pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      // Existing pending and cancelled reservations must not block
+      // a new confirmed reservation for the same equipment item.
+      await client.query(
+        `INSERT INTO public.reservations
+         (item_id, borrower_id, lab_id, start_at, end_at, status)
+         VALUES ($1, $2, $3, $4, $5, 'pending')`,
+        [migrationItemId, borrowerId, labId, "2098-06-01T10:15:00Z", "2098-06-01T10:45:00Z"],
+      );
+
+      await client.query(
+        `INSERT INTO public.reservations
+         (item_id, borrower_id, lab_id, start_at, end_at, status)
+         VALUES ($1, $2, $3, $4, $5, 'cancelled')`,
+        [migrationItemId, borrowerId, labId, "2098-06-01T10:15:00Z", "2098-06-01T10:45:00Z"],
+      );
+
+      const itemOne = migrationItemId;
+      const itemTwo = returnItemId;
+
+      // First confirmed reservation: 10:00–11:00.
+      await client.query(
+        `INSERT INTO public.reservations
+         (item_id, borrower_id, lab_id, start_at, end_at, status)
+         VALUES ($1, $2, $3, $4, $5, 'confirmed')`,
+        [itemOne, borrowerId, labId, "2098-06-01T10:00:00Z", "2098-06-01T11:00:00Z"],
+      );
+
+      // Overlapping confirmed reservation for the same item must fail.
+      await client.query("SAVEPOINT overlapping_attempt");
+
+      await expect(
+        client.query(
+          `INSERT INTO public.reservations
+           (item_id, borrower_id, lab_id, start_at, end_at, status)
+           VALUES ($1, $2, $3, $4, $5, 'confirmed')`,
+          [itemOne, borrowerId, labId, "2098-06-01T10:30:00Z", "2098-06-01T11:30:00Z"],
+        ),
+      ).rejects.toMatchObject({
+        code: "23P01",
+        constraint: "reservations_no_overlapping_confirmed",
+      });
+
+      await client.query("ROLLBACK TO SAVEPOINT overlapping_attempt");
+
+      // Consecutive reservations for the same item must be allowed.
+      await client.query(
+        `INSERT INTO public.reservations
+         (item_id, borrower_id, lab_id, start_at, end_at, status)
+         VALUES ($1, $2, $3, $4, $5, 'confirmed')`,
+        [itemOne, borrowerId, labId, "2098-06-01T11:00:00Z", "2098-06-01T12:00:00Z"],
+      );
+
+      // Different equipment items may be reserved at the same time.
+      await client.query(
+        `INSERT INTO public.reservations
+         (item_id, borrower_id, lab_id, start_at, end_at, status)
+         VALUES ($1, $2, $3, $4, $5, 'confirmed')`,
+        [itemTwo, borrowerId, labId, "2098-06-01T10:30:00Z", "2098-06-01T11:30:00Z"],
+      );
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   });
 });
