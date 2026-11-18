@@ -132,6 +132,8 @@ describe("GET /api/reservations/pickup", () => {
     ["inspection_required", false],
     ["under_maintenance", false],
     ["retired", false],
+    ["lost", false],
+    ["overdue", false],
   ] as const)(
     "enforces handover eligibility for equipment status %s",
     async (status, expectedCanHandover) => {
