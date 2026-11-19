@@ -298,17 +298,24 @@ all pickup records, or `confirmed` + `applied` + none of them. Recovery runs the
 same T2 from the stored plan (checklist, confirmation and ID-check evidence),
 never from the browser.
 
-**Deadlock freedom.** L1 never waits. Every handover transaction takes L2 then
-L3. The autocommit state writes take only a row lock and hold nothing else a
-reservation writer could wait for. A reservation writer that follows the same
-order (C1, C2 below) cannot deadlock with handover. Cost: while T1 or T3 holds
-L2/L3, a writer for the same item waits for those HTTP calls (Equipment/Users
-time out after 3 s each).
+**Deadlock risk (reduced, not eliminated).** L1 never waits. Every handover
+transaction takes L2 then L3, and the autocommit state writes take only a row
+lock. A reservation writer that follows the same order (C1, C2 below) removes
+the lock-order cycle between these two locks, which **reduces** deadlock risk.
+It does not rule deadlocks out: other locks (foreign-key checks, other tables,
+a writer that does not follow the order, several items) can still form a
+cycle. PostgreSQL then detects it and aborts one transaction (SQLSTATE 40P01).
+For handover that is an ordinary failed transaction: the plan or final
+transaction rolls back and the existing guarded paths apply. Reservation
+writers must handle it as a retryable error. Cost: while T1 or T3 holds L2/L3,
+a writer for the same item waits for those HTTP calls (Equipment/Users time
+out after 3 s each).
 
 ### Persisted operation states (`reservations.status` + `handover_operation ->> 'state'`)
 
 | `status` | state | Meaning | May the reservation be cancelled / rescheduled? |
 | --- | --- | --- | --- |
+| `pending` (or any not-yet-confirmed status) | NULL | Not eligible for handover; handover never starts on it | Yes — under LJ's own rules; this contract adds nothing |
 | `confirmed` | NULL | No handover started | Yes (LJ's normal rules) |
 | `confirmed` | `planned` | Plan committed; Equipment checkout **may or may not** have happened (uncertain) | **No** |
 | `confirmed` | `applied` | Equipment checked the item out; loan not yet saved | **No** |
@@ -316,9 +323,10 @@ time out after 3 s each).
 | `confirmed` | `compensated` | Undo **confirmed**: Equipment restored, no loan, nothing in progress | **Yes — restriction released** |
 | `fulfilled` | `completed` | Loan and every pickup record committed with fulfilment | **Never** (decision 3) |
 
-**When cancellation may safely resume:** only when, on the row locked under
-L2 → L3, `status = 'confirmed'`, the state is NULL or `compensated`, and no
-`loans` row has this `reservation_id`. A `planned`, `applied` or `compensating`
+**When cancellation of a confirmed reservation may safely resume:** only
+when, on the row locked under L2 → L3, the state is NULL or `compensated`, and
+no `loans` row has this `reservation_id`. Cancelling a `pending` reservation is
+not affected by handover and stays allowed under its own rules. A `planned`, `applied` or `compensating`
 operation is released only by **Finish interrupted handover** — which ends in
 `completed` (→ `fulfilled`, never cancellable) or `compensated` (cancellable) —
 or by a lab manager's reconciliation (no tool; existing accepted scope). No
@@ -334,25 +342,31 @@ timeout, age or session end releases it.
   `loans:handover:<id>` (handover's private session lock).
 - **C2 — then the reservation row:** `SELECT … FOR UPDATE`, and check that its
   `item_id` is the one locked in C1.
-- **C3 — cancel / expire / un-confirm** only if, on that locked row,
-  `status = 'confirmed'` (or not yet confirmed), `handover_operation IS NULL OR
-  handover_operation ->> 'state' = 'compensated'`, and no `loans` row has this
-  `reservation_id`. Otherwise refuse (suggested 409: "A handover for this
-  reservation is in progress or finished. Finish or undo it first.").
+- **C3 — cancel / expire / un-confirm a CONFIRMED reservation** only if, on
+  that locked row, `handover_operation IS NULL OR handover_operation ->>
+  'state' = 'compensated'`, and no `loans` row has this `reservation_id`.
+  Otherwise refuse (suggested 409: "A handover for this reservation is in
+  progress or finished. Finish or undo it first."). A `pending` reservation
+  can never have a handover; cancelling it remains allowed under LJ's own
+  rules and is not restricted by this contract.
 - **C4 — `fulfilled` is terminal** and written only by handover's final
   transaction.
 - **C5 — confirmed details immutable:** `item_id`, `borrower_id`, `lab_id`,
   `start_at`, `end_at` (decision 7; rescheduling = cancel + new, allowed only
   under C3).
 - **C6 — never write `handover_operation`.**
-- **C7 — S2-02 constraint:** a `fulfilled` reservation leaves
-  `WHERE (status = 'confirmed')`, so a new booking could overlap equipment that
-  is out on loan. Suggest `WHERE (status IN ('confirmed', 'fulfilled'))`
-  (LJ/JS to decide; side effect: after an early return the fulfilled window
-  still blocks re-booking).
+- **C7 — PROPOSAL ONLY, requires LJ/JS review (not agreed, not implemented):**
+  a `fulfilled` reservation leaves S2-02's `WHERE (status = 'confirmed')`, so a
+  new booking could overlap the window of equipment that is out on loan. One
+  option is extending the constraint to `WHERE (status IN ('confirmed',
+  'fulfilled'))`. The review must cover early returns: with that change a
+  fulfilled window keeps blocking re-booking after the item comes back early
+  (Return does not change the reservation), and it does not cover a loan that
+  runs past `end_at`. Alternatives (e.g. relying on handover's active-loan check
+  only, or ending the fulfilled window at return) are for LJ/JS to weigh.
 
-Why both commit orders are safe: handover T2 and a C1–C3 cancel serialize on L2
-(and L3). If the cancel commits first, T2 sees `cancelled` and refuses
+Why both commit orders are safe for a confirmed reservation: handover T2 and a
+C1–C3 cancel serialize on L2 (and L3). If the cancel commits first, T2 sees `cancelled` and refuses
 (guarded undo, no loan — tested). If T2 commits first, the cancel sees
 `fulfilled` + loan and refuses. If the cancel runs while the state is
 `planned`/`applied`/`compensating`, it refuses. Only `compensated` lets it
@@ -522,8 +536,14 @@ Supabase user ID> -AssistantEmail <your email>` starts a local container, applie
 LOGIN accounts that only inherit their 006 group roles
 (`manual_service_logins.sql`), and loads `handover_manual_fixture.sql`. Then run
 `-Action Run -Service users|equipment|loans` in three terminals. Setup also
-applies the SYNTHETIC S2-01 status grant so the handover can mark the
-reservation fulfilled (stand-in only, see "Minimal grant / RLS for fulfilment"): each service
+applies the SYNTHETIC S2-01 status grant (to `unitrack_loans_service`; the
+`unitrack_loans_local` login inherits it) so the handover can mark the
+reservation fulfilled, then runs `manual_fulfilment_permission_check.sql`: the
+Loans login must be able to run the fulfilment update (rolled back) and must
+have nothing broader (no table-level UPDATE, no date/item/borrower/lab column,
+nothing for the Users/Equipment logins). This stand-in is local only and is not
+LJ's migration (see "Minimal grant / RLS for fulfilment"). Setup refuses to
+reuse any existing manual container, running or stopped: each service
 connects with its OWN restricted account (never the container superuser), and the
 script restores the terminal's `DATABASE_URL`/`LOANS_DATABASE_SESSION_AFFINITY`
 when it exits. Start Web normally. `-Action Teardown` removes everything.
@@ -547,8 +567,11 @@ Shared Supabase was not used; no shared migration was applied.
   `start_at <= now < end_at`, automatic single selection with multiple eligible
   reservations blocking, immutable confirmed dates. Earlier: identity, recovery
   scope, uncertain-outcome UI (table at the top).
-- **Pending technical agreement (LJ/JS):** the coordination contract C1–C7, the
-  minimal grant, and whether S2-02's constraint covers `fulfilled` (C7).
+- **Pending technical agreement (LJ/JS):** the coordination contract C1–C6 and
+  the minimal grant.
+- **Proposal needing review (LJ/JS):** C7 — whether and how S2-02's overlap
+  constraint should cover `fulfilled` reservations, including early-return
+  behaviour.
 - **Dependency (LJ, S2-01 migration):** `GRANT UPDATE (status) ON
   public.reservations TO unitrack_loans_service`. Without it no handover can
   complete (503 `reservation_fulfillment_unavailable`, nothing changed).

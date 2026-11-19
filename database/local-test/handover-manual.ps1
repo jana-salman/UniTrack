@@ -33,8 +33,10 @@ switch ($Action) {
       throw 'Pass -AssistantId with your Supabase Auth user ID (a UUID).'
     }
     if ([string]::IsNullOrWhiteSpace($AssistantEmail)) { throw 'Pass -AssistantEmail with that account''s university email.' }
-    if (docker compose --project-name $project --file $composeFile ps -q) {
-      throw 'The manual test database is already running. Use it, or run -Action Teardown first.'
+    # Any existing container (running OR stopped) may predate the current
+    # migrations; refuse to reuse it.
+    if (docker compose --project-name $project --file $composeFile ps --all -q) {
+      throw 'A manual test database container already exists (running or stopped). Run -Action Teardown first.'
     }
     docker compose --project-name $project --file $composeFile up --detach --wait postgres
     if ($LASTEXITCODE -ne 0) { throw 'Docker PostgreSQL startup failed.' }
@@ -50,6 +52,9 @@ switch ($Action) {
     Invoke-Psql @('--file', '/workspace/database/local-test/manual_service_logins.sql') 'Restricted service logins'
     Invoke-Psql @('--set', "assistant_id=$AssistantId", '--set', "assistant_email=$AssistantEmail",
       '--file', '/workspace/database/local-test/handover_manual_fixture.sql') 'Synthetic handover fixture'
+    # Prove the restricted Loans LOGIN can mark reservations fulfilled, and nothing broader.
+    Invoke-Psql @('--file', '/workspace/database/local-test/manual_fulfilment_permission_check.sql') 'Fulfilment permission check'
+    Write-Host 'NOTE: reservation fulfilment uses the SYNTHETIC local stand-in grant (UPDATE (status) on reservations), not LJ''s S2-01 migration.'
     Push-Location $repositoryRoot
     try { npm run build:packages; if ($LASTEXITCODE -ne 0) { throw 'Shared package build failed.' } }
     finally { Pop-Location }

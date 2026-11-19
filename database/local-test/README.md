@@ -65,7 +65,10 @@ which does not exist yet. The handover integration test (and
 `handover-manual.ps1 -Action Setup`) therefore applies
 `SYNTHETIC_s2-01_reservation_status_grant.sql` — that one column grant, nothing
 else — after `verify_C430PRJCT-40.sql` has confirmed that the S2-09 migration
-alone grants no status update. Passing tests with this stand-in does **not**
+alone grants no status update. For the browser setup,
+`manual_fulfilment_permission_check.sql` then proves the restricted
+`unitrack_loans_local` login inherits exactly that permission and nothing
+broader. Passing tests with this stand-in does **not**
 verify LJ's final migration. The test's `cancelUnderContract` helper and its
 COMMIT-fault trigger are also test-only.
 

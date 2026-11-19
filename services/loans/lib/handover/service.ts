@@ -178,8 +178,9 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
   }
   /**
    * Inside the caller's transaction: the common per-item lock FIRST, then the
-   * reservation row FOR UPDATE (canonical order shared with reservation
-   * writers, so the two can never deadlock). The item is read unlocked only to
+   * reservation row FOR UPDATE (one order shared with reservation writers,
+   * which reduces deadlock risk; PostgreSQL still aborts any remaining cycle
+   * with 40P01, handled as a failed transaction). The item is read unlocked only to
    * name the lock; a different item under the row lock is a reservation change.
    */
   async function lockReservation(): Promise<ReservationRow | undefined> {
