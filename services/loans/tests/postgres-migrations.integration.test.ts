@@ -33,9 +33,19 @@ const borrowerId = "00000000-0000-4000-8000-000000000002";
 const migrationItemId = "00000000-0000-4000-8000-000000000101";
 const returnItemId = "00000000-0000-4000-8000-000000000102";
 const loanId = "00000000-0000-4000-8000-000000000201";
+const legacyReturnedLoanId = "00000000-0000-4000-8000-000000000202";
 const labId = 7001;
 
 let pool: Pool;
+let loansPool: Pool;
+
+function restricted(role: string): Pool {
+  return new Pool({
+    connectionString: configuredDatabaseUrl,
+    max: 6,
+    options: `-c role=${role}`,
+  });
+}
 
 async function changeStatus(
   itemId: string,
@@ -59,7 +69,7 @@ async function changeStatus(
   }
 }
 
-localDescribe("migrations 003-005 on disposable PostgreSQL", () => {
+localDescribe("migrations 003-006 and S2-02 on disposable PostgreSQL", () => {
   beforeAll(async () => {
     if (configuredDatabaseUrl !== expectedDatabaseUrl) {
       throw new Error(
@@ -67,13 +77,14 @@ localDescribe("migrations 003-005 on disposable PostgreSQL", () => {
       );
     }
     pool = new Pool({ connectionString: configuredDatabaseUrl, max: 6 });
-    database.pool = pool;
-    await pool.query("select 1");
+    loansPool = restricted("unitrack_loans_service");
+    database.pool = loansPool;
+    await Promise.all([pool.query("select 1"), loansPool.query("select 1")]);
   });
 
   afterAll(async () => {
     database.pool = null;
-    await pool?.end();
+    await Promise.all([pool?.end(), loansPool?.end()]);
   });
 
   it("has the migrated columns, valid indexes, and enabled migration triggers", async () => {
@@ -203,7 +214,146 @@ localDescribe("migrations 003-005 on disposable PostgreSQL", () => {
     });
   });
 
-  it("runs the real Loans return service against Equipment transaction SQL", async () => {
+  it("enforces custody permissions and recovery transitions as the restricted Loans role", async () => {
+    const client = await loansPool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Pickup INSERT remains available after migration 007.
+      await client.query(
+        `insert into public.condition_records
+         (id, loan_id, item_id, lab_id, phase, condition_status, notes, recorded_by)
+         values ('00000000-0000-4000-8000-000000000302', $1, $2, $3,
+                 'pickup', 'good', 'Restricted-role pickup check', $4)`,
+        [loanId, returnItemId, labId, assistantId],
+      );
+
+      await client.query("SAVEPOINT condition_update");
+      await expect(client.query(
+        "update public.condition_records set notes = 'forbidden' where id = '00000000-0000-4000-8000-000000000302'",
+      )).rejects.toMatchObject({ code: "42501" });
+      await client.query("ROLLBACK TO SAVEPOINT condition_update");
+
+      await client.query("SAVEPOINT condition_delete");
+      await expect(client.query(
+        "delete from public.condition_records where id = '00000000-0000-4000-8000-000000000302'",
+      )).rejects.toMatchObject({ code: "42501" });
+      await client.query("ROLLBACK TO SAVEPOINT condition_delete");
+
+      await client.query("SAVEPOINT immutable_loan");
+      await expect(client.query(
+        "update public.loans set due_date = due_date + interval '1 day' where id = $1",
+        [loanId],
+      )).rejects.toMatchObject({ code: "42501" });
+      await client.query("ROLLBACK TO SAVEPOINT immutable_loan");
+
+      const operation = {
+        fingerprint: "c".repeat(64),
+        key: "return:cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        attempt: 0,
+        actor: assistantId,
+        previous: "checked_out",
+        state: "planned",
+        result: {
+          loanId,
+          status: "available",
+          isLate: false,
+          returnedAt: "2026-11-19T14:00:00.000Z",
+        },
+      };
+      await client.query(
+        "update public.loans set return_operation = $1::jsonb where id = $2",
+        [JSON.stringify(operation), loanId],
+      );
+      // Exercise recovery from planned and applied, resume compensating, then
+      // a compensated retry with the required attempt increment.
+      for (const state of ["applied", "compensating", "compensated"] as const) {
+        await client.query(
+          "update public.loans set return_operation = jsonb_set(return_operation, '{state}', to_jsonb($1::text)) where id = $2",
+          [state, loanId],
+        );
+      }
+      await client.query(
+        `update public.loans
+         set return_operation = jsonb_set(
+               jsonb_set(return_operation, '{state}', '"planned"'::jsonb),
+               '{attempt}', '1'::jsonb)
+         where id = $1`,
+        [loanId],
+      );
+      const recovered = await client.query<{ state: string; attempt: number }>(
+        `select return_operation ->> 'state' as state,
+                (return_operation ->> 'attempt')::int as attempt
+         from public.loans where id = $1`,
+        [loanId],
+      );
+      expect(recovered.rows[0]).toEqual({ state: "planned", attempt: 1 });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+  });
+
+  it("rejects a committed applied operation with returned_at and preserves legacy returned loans", async () => {
+    const client = await loansPool.connect();
+    try {
+      const operation = {
+        fingerprint: "d".repeat(64),
+        key: "return:dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        attempt: 0,
+        actor: assistantId,
+        previous: "checked_out",
+        state: "planned",
+        result: {
+          loanId,
+          status: "available",
+          isLate: false,
+          returnedAt: "2026-11-19T15:00:00.000Z",
+        },
+      };
+      await client.query("BEGIN");
+      await client.query(
+        "update public.loans set return_operation = $1::jsonb where id = $2",
+        [JSON.stringify(operation), loanId],
+      );
+      await client.query(
+        "update public.loans set return_operation = jsonb_set(return_operation, '{state}', to_jsonb($1::text)) where id = $2",
+        ["applied", loanId],
+      );
+      await client.query(
+        "update public.loans set returned_at = $1 where id = $2",
+        [operation.result.returnedAt, loanId],
+      );
+      await expect(client.query("COMMIT")).rejects.toMatchObject({
+        code: "P0001",
+        message: "Committed return requires a matching completed return operation",
+      });
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      client.release();
+    }
+
+    expect((await pool.query<{ returned_at: Date | null; return_operation: unknown }>(
+      "select returned_at, return_operation from public.loans where id = $1",
+      [loanId],
+    )).rows[0]).toEqual({ returned_at: null, return_operation: null });
+
+    // An already-returned legacy row is not required to gain a synthetic
+    // return_operation and its unchanged timestamp remains valid.
+    await pool.query(
+      `insert into public.loans
+       (id, item_id, borrower_id, lab_id, borrowed_at, due_date, returned_at)
+       values ($1, $2, $3, $4, '2026-01-01T00:00:00Z',
+               '2026-02-01T00:00:00Z', '2026-01-15T00:00:00Z')`,
+      [legacyReturnedLoanId, migrationItemId, borrowerId, labId],
+    );
+    await expect(loansPool.query(
+      "update public.loans set returned_at = returned_at where id = $1",
+      [legacyReturnedLoanId],
+    )).resolves.toMatchObject({ rowCount: 1 });
+  });
+
+  it("runs normal completion and replay as the restricted Loans role", async () => {
     const equipment = {
       getComponents: async () => [],
       getItem: async (itemId: string, requestedLabId: number) => {
@@ -296,5 +446,75 @@ localDescribe("migrations 003-005 on disposable PostgreSQL", () => {
       [loanId, returnItemId],
     );
     expect(replayCounts.rows[0]).toEqual({ return_records: 1, keyed_receipts: 1 });
+  });
+  it("prevents overlapping confirmed reservations for the same equipment item", async () => {
+    const client = await pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      // Existing pending and cancelled reservations must not block
+      // a new confirmed reservation for the same equipment item.
+      await client.query(
+        `INSERT INTO public.reservations
+         (item_id, borrower_id, lab_id, start_at, end_at, status)
+         VALUES ($1, $2, $3, $4, $5, 'pending')`,
+        [migrationItemId, borrowerId, labId, "2098-06-01T10:15:00Z", "2098-06-01T10:45:00Z"],
+      );
+
+      await client.query(
+        `INSERT INTO public.reservations
+         (item_id, borrower_id, lab_id, start_at, end_at, status)
+         VALUES ($1, $2, $3, $4, $5, 'cancelled')`,
+        [migrationItemId, borrowerId, labId, "2098-06-01T10:15:00Z", "2098-06-01T10:45:00Z"],
+      );
+
+      const itemOne = migrationItemId;
+      const itemTwo = returnItemId;
+
+      // First confirmed reservation: 10:00–11:00.
+      await client.query(
+        `INSERT INTO public.reservations
+         (item_id, borrower_id, lab_id, start_at, end_at, status)
+         VALUES ($1, $2, $3, $4, $5, 'confirmed')`,
+        [itemOne, borrowerId, labId, "2098-06-01T10:00:00Z", "2098-06-01T11:00:00Z"],
+      );
+
+      // Overlapping confirmed reservation for the same item must fail.
+      await client.query("SAVEPOINT overlapping_attempt");
+
+      await expect(
+        client.query(
+          `INSERT INTO public.reservations
+           (item_id, borrower_id, lab_id, start_at, end_at, status)
+           VALUES ($1, $2, $3, $4, $5, 'confirmed')`,
+          [itemOne, borrowerId, labId, "2098-06-01T10:30:00Z", "2098-06-01T11:30:00Z"],
+        ),
+      ).rejects.toMatchObject({
+        code: "23P01",
+        constraint: "reservations_no_overlapping_confirmed",
+      });
+
+      await client.query("ROLLBACK TO SAVEPOINT overlapping_attempt");
+
+      // Consecutive reservations for the same item must be allowed.
+      await client.query(
+        `INSERT INTO public.reservations
+         (item_id, borrower_id, lab_id, start_at, end_at, status)
+         VALUES ($1, $2, $3, $4, $5, 'confirmed')`,
+        [itemOne, borrowerId, labId, "2098-06-01T11:00:00Z", "2098-06-01T12:00:00Z"],
+      );
+
+      // Different equipment items may be reserved at the same time.
+      await client.query(
+        `INSERT INTO public.reservations
+         (item_id, borrower_id, lab_id, start_at, end_at, status)
+         VALUES ($1, $2, $3, $4, $5, 'confirmed')`,
+        [itemTwo, borrowerId, labId, "2098-06-01T10:30:00Z", "2098-06-01T11:30:00Z"],
+      );
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   });
 });

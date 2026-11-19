@@ -302,6 +302,13 @@ BEGIN
         )
         WHERE id = '00000000-0000-4000-8000-000000000201';
 
+        -- Force the deferred commit-time check while this subtransaction still
+        -- contains the final completed row. A real Return lets it fire at COMMIT.
+        EXECUTE
+            'SET CONSTRAINTS loans_require_completed_return_at_commit IMMEDIATE';
+        EXECUTE
+            'SET CONSTRAINTS loans_require_completed_return_at_commit DEFERRED';
+
         -- Check that the completed return was recorded.
         IF NOT EXISTS (
             SELECT 1 FROM public.loans
@@ -361,6 +368,87 @@ BEGIN
         END IF;
     END;
 
+    -- TEST 11: An applied operation plus returned_at cannot be the final
+    -- committed state. Force the deferred trigger to simulate COMMIT and prove
+    -- it reads the final row rather than accepting the intermediate UPDATE.
+    BEGIN
+        UPDATE public.loans
+        SET return_operation = jsonb_build_object(
+            'fingerprint', repeat('b', 64),
+            'key', 'return:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+            'attempt', 0,
+            'actor', '00000000-0000-4000-8000-000000000001',
+            'previous', 'checked_out',
+            'state', 'planned',
+            'result', jsonb_build_object(
+                'loanId', id::text,
+                'status', 'available',
+                'isLate', false,
+                'returnedAt', '2026-11-19T13:00:00.000Z'
+            )
+        )
+        WHERE id = '00000000-0000-4000-8000-000000000201';
+
+        UPDATE public.loans
+        SET return_operation = jsonb_set(
+            return_operation, '{state}', '"applied"'
+        )
+        WHERE id = '00000000-0000-4000-8000-000000000201';
+
+        UPDATE public.loans
+        SET returned_at = '2026-11-19T13:00:00.000Z'::timestamptz
+        WHERE id = '00000000-0000-4000-8000-000000000201';
+
+        EXECUTE
+            'SET CONSTRAINTS loans_require_completed_return_at_commit IMMEDIATE';
+
+        RAISE EXCEPTION
+            'TEST 11 FAILED: applied operation with returned_at was accepted';
+
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM <>
+           'Committed return requires a matching completed return operation'
+        THEN
+            RAISE;
+        END IF;
+    END;
+
+    EXECUTE
+        'SET CONSTRAINTS loans_require_completed_return_at_commit DEFERRED';
+
+    -- TEST 12: The returned loan seeded before migration 007 remains valid. The
+    -- migration does not require it to gain a return_operation, and an unchanged
+    -- timestamp can still participate in a harmless no-op write.
+    UPDATE public.loans
+    SET returned_at = returned_at
+    WHERE id = '00000000-0000-4000-8000-000000000299';
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.loans
+        WHERE id = '00000000-0000-4000-8000-000000000299'
+          AND returned_at = '2026-01-15T00:00:00Z'::timestamptz
+          AND return_operation IS NULL
+    ) THEN
+        RAISE EXCEPTION
+            'TEST 12 FAILED: legacy returned loan was not preserved';
+    END IF;
+
+    -- TEST 13: The final-row trigger is enabled and deferred to transaction end.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgrelid = 'public.loans'::regclass
+          AND tgname = 'loans_require_completed_return_at_commit'
+          AND tgenabled <> 'D'
+          AND tgdeferrable
+          AND tginitdeferred
+          AND NOT tgisinternal
+    ) THEN
+        RAISE EXCEPTION
+            'TEST 13 FAILED: deferred return-completion trigger is missing';
+    END IF;
+
 
 
     RAISE NOTICE
@@ -370,7 +458,7 @@ END;
 $$;
 
 
--- TEST 11: Verify restricted Loans Service UPDATE permissions.
+-- TEST 14: Verify restricted Loans Service UPDATE permissions.
 
 DO $$
 BEGIN
@@ -388,7 +476,7 @@ BEGIN
         'UPDATE'
     ) THEN
         RAISE EXCEPTION
-            'TEST 11 FAILED: Required return permissions are missing';
+            'TEST 14 FAILED: Required return permissions are missing';
     END IF;
 
     -- Unrestricted table-level UPDATE must be removed.
@@ -398,7 +486,7 @@ BEGIN
         'UPDATE'
     ) THEN
         RAISE EXCEPTION
-            'TEST 11 FAILED: Unrestricted loan UPDATE is allowed';
+            'TEST 14 FAILED: Unrestricted loan UPDATE is allowed';
     END IF;
 
     -- Original loan information must not be writable.
@@ -415,7 +503,7 @@ BEGIN
         'UPDATE'
     ) THEN
         RAISE EXCEPTION
-            'TEST 11 FAILED: Historical loan fields are writable';
+            'TEST 14 FAILED: Historical loan fields are writable';
     END IF;
 
     RAISE NOTICE

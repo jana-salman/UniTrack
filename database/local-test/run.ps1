@@ -57,6 +57,13 @@ try {
   Invoke-PsqlFile '/workspace/database/migrations/006_service_database_isolation.sql' 'Migration 006'
   Invoke-PsqlFile '/workspace/database/local-test/verify_006.sql' 'Migration 006 verification'
 
+  Write-Host 'Applying and verifying migration S2-02 locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/S2-02_no_double_booking.sql' 'Migration S2-02'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_S2-02.sql' 'Migration S2-02 verification'
+
+  Write-Host 'Seeding a legacy returned loan before migration 007...'
+  Invoke-PsqlFile '/workspace/database/local-test/prepare_007_legacy.sql' 'Migration 007 legacy fixture'
+
   Write-Host 'Applying migration 007 custody protection locally...'
   Invoke-PsqlFile '/workspace/database/migrations/007_custody_record_protection.sql' 'Migration 007 custody protection'
 
@@ -89,7 +96,7 @@ try {
     Pop-Location
   }
 
-  Write-Host 'PASS: migrations 003-006 and the focused microservice integration checks passed locally.'
+  Write-Host 'PASS: migrations 003-007 and S2-02, plus the focused microservice integration checks, passed locally.'
 }
 finally {
   if ($containerStarted) {

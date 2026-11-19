@@ -288,6 +288,57 @@ BEFORE UPDATE ON public.loans
 FOR EACH ROW
 EXECUTE FUNCTION public.prevent_unauthorized_loan_updates();
 
+-- The BEFORE trigger validates each individual statement, but Return records
+-- returned_at and then marks return_operation completed in a second statement
+-- in the SAME transaction. A deferred constraint trigger validates the final
+-- persisted row at commit: this preserves the legitimate multi-statement
+-- transaction while preventing an applied + returned_at intermediate state
+-- from being committed on its own. Existing legacy returned loans are not
+-- queued because this trigger only observes NULL -> non-NULL transitions.
+
+CREATE OR REPLACE FUNCTION public.require_completed_return_at_commit()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    final_returned_at TIMESTAMPTZ;
+    final_return_operation JSONB;
+BEGIN
+    SELECT returned_at, return_operation
+    INTO final_returned_at, final_return_operation
+    FROM public.loans
+    WHERE id = NEW.id;
+
+    IF NOT FOUND
+       OR final_returned_at IS NULL
+       OR final_return_operation IS NULL
+       OR final_return_operation->>'state' IS DISTINCT FROM 'completed'
+       OR final_return_operation->'result'->>'loanId'
+            IS DISTINCT FROM NEW.id::text
+       OR final_return_operation->'result'->>'returnedAt' IS NULL
+       OR (
+            final_return_operation->'result'->>'returnedAt'
+          )::timestamptz IS DISTINCT FROM final_returned_at
+    THEN
+        RAISE EXCEPTION
+            'Committed return requires a matching completed return operation';
+    END IF;
+
+    RETURN NULL;
+END;
+$$;
+
+-- PostgreSQL does not support OR REPLACE for constraint triggers.
+DROP TRIGGER IF EXISTS loans_require_completed_return_at_commit
+ON public.loans;
+
+CREATE CONSTRAINT TRIGGER loans_require_completed_return_at_commit
+AFTER UPDATE OF returned_at ON public.loans
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+WHEN (OLD.returned_at IS NULL AND NEW.returned_at IS NOT NULL)
+EXECUTE FUNCTION public.require_completed_return_at_commit();
+
 -- =========================================================
 -- Restrict Loans Service UPDATE permissions
 -- =========================================================
