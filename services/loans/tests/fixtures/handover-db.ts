@@ -44,6 +44,10 @@ export function handoverDatabase() {
     commitFailure: "" as "" | "before" | "after",
     planCommitFailure: "" as "" | "before" | "after",
     compensationCommitFailure: "" as "" | "before" | "after",
+    /** Models LJ's S2-01 `UPDATE (status)` grant being absent (has_column_privilege false). */
+    noFulfillmentGrant: false,
+    /** The fulfilment UPDATE fails ("error", e.g. 42501) or affects no row ("zero", e.g. RLS). */
+    fulfilFailure: "" as "" | "error" | "zero",
     /** Runs once, just before the final transaction's eligibility check. */
     beforeFinalCheck: null as null | (() => void),
   };
@@ -88,6 +92,16 @@ export function handoverDatabase() {
   async function answer(text: string, values: unknown[]) {
     const r = state.reservation;
     if (text.includes("pg_advisory_xact_lock")) return { rows: [] };
+    if (text.includes("has_column_privilege('public.reservations', 'status', 'UPDATE')")) return { rows: [{ allowed: !settings.noFulfillmentGrant }] };
+    if (text.includes("set status = 'fulfilled'")) {
+      if (settings.fulfilFailure === "error") throw Object.assign(new Error("permission denied for table reservations"), { code: "42501" });
+      const [op, id, lab, item, borrower] = values as [string, string, number, string, string];
+      const matches = settings.fulfilFailure !== "zero" && id === r.id && lab === r.lab_id && item === r.item_id && borrower === r.borrower_id
+        && r.status === "confirmed";
+      if (!matches) return { rows: [] };
+      r.status = "fulfilled"; r.handover_operation = JSON.parse(op);
+      return { rows: [{ id: r.id }] };
+    }
     if (text.includes("count(*)::int as count from public.reservations")) {
       const [item, at] = values as [string, Date];
       const all = [r, ...state.otherReservations];

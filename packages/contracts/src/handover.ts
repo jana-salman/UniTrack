@@ -210,10 +210,12 @@ export const HANDOVER_ERROR_MESSAGES = [
   "Equipment rejected the handover. Verify its status before retrying.",
   "The handover result needs verification. Retry the same handover information or ask staff to reconcile it.",
   "Handover records were not saved. Equipment was restored. Retry the same handover information.",
+  "Handover is not available yet: reservations cannot be marked fulfilled. Nothing was changed. Ask an administrator.",
 ] as const;
 export const HANDOVER_ERROR_CODES = [
   "invalid_reservation", "reservation_not_found", "invalid_handover",
   "student_confirmation_required", "id_verification_required", "handover_conflict",
   "handover_state_uncertain", "handover_rolled_back",
   "borrower_unverified", "borrower_unavailable", "handover_incomplete", "handover_not_pending",
+  "reservation_fulfillment_unavailable",
 ] as const;

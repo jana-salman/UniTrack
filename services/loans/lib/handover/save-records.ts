@@ -35,3 +35,34 @@ export async function saveHandoverRecordsInTransaction(
     );
   }
 }
+
+/**
+ * PO decision (JS/ZZ): a successful handover changes the reservation to
+ * `fulfilled`. Runs in the SAME local transaction as
+ * saveHandoverRecordsInTransaction, after the loan and every pickup record, so
+ * fulfillment, loan and pickup records commit or roll back together. It also
+ * stores the completed operation (the idempotent replay result) in the same
+ * statement. Only a still-`confirmed` reservation with the planned item and
+ * borrower is changed; anything else affects no row and the caller rolls the
+ * whole transaction back. The confirmed dates are compared by the caller on
+ * the row it holds FOR UPDATE in this same transaction (SQL equality against
+ * JavaScript millisecond times would miss PostgreSQL's microseconds).
+ *
+ * Needs `UPDATE (status)` on public.reservations for the Loans role. That
+ * grant belongs to LJ's S2-01 reservation-write migration, not to S2-09.
+ */
+export async function fulfilReservationInTransaction(
+  client: PoolClient,
+  result: HandoverOutcome,
+  labId: number,
+  completedOperation: unknown,
+): Promise<void> {
+  const updated = await client.query(
+    `update public.reservations
+     set status = 'fulfilled', handover_operation = $1::jsonb
+     where id = $2 and lab_id = $3 and item_id = $4 and borrower_id = $5 and status = 'confirmed'
+     returning id`,
+    [JSON.stringify(completedOperation), result.reservationId, labId, result.itemId, result.borrowerId],
+  );
+  if (updated.rows.length !== 1) throw new Error("The reservation was not marked fulfilled.");
+}

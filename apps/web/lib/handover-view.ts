@@ -68,14 +68,16 @@ export function isInterruptedList(value: unknown): value is InterruptedHandover[
 /**
  * How a handover request ended, for the page (PO decision via JS: uncertain
  * outcomes must be clearly shown and must block fresh submissions).
- *   failed    - nothing was handed over (validation/conflict, or the checkout
- *               was undone and Equipment restored); the form may be corrected.
+ *   failed    - nothing was handed over (validation/conflict, fulfillment not
+ *               permitted, or the checkout was undone and Equipment restored);
+ *               the form may be corrected.
  *   uncertain - the checkout may or may not have happened; only a retry of the
  *               SAME information or Finish interrupted handover is allowed.
  * Unknown 5xx codes, network errors and unverifiable responses are uncertain.
  */
 export type HandoverFailureKind = "failed" | "uncertain";
-const DEFINITE_5XX = new Set(["borrower_unavailable", "handover_rolled_back"]);
+// reservation_fulfillment_unavailable: refused before any Equipment change.
+const DEFINITE_5XX = new Set(["borrower_unavailable", "handover_rolled_back", "reservation_fulfillment_unavailable"]);
 export function classifyHandoverFailure(status: number, code: unknown): HandoverFailureKind {
   if (status < 500) return "failed";
   return typeof code === "string" && DEFINITE_5XX.has(code) ? "failed" : "uncertain";

@@ -41,7 +41,11 @@ BEGIN
     RAISE EXCEPTION 'S2-09 verification failed: existing rows were backfilled';
   END IF;
 
-  -- Column-level least privilege for Loans.
+  -- Column-level least privilege for Loans. Run right after the S2-09 migration:
+  -- S2-09 itself grants NO reservation status update. Fulfilment's
+  -- UPDATE (status) comes from LJ's S2-01 migration (in local tests, from the
+  -- clearly marked SYNTHETIC_s2-01_reservation_status_grant.sql stand-in,
+  -- applied only after this script).
   IF NOT has_column_privilege('unitrack_loans_service', 'public.loans', 'student_confirmed_at', 'INSERT')
      OR NOT has_column_privilege('unitrack_loans_service', 'public.loans', 'university_id_verified_at', 'INSERT')
      OR NOT has_column_privilege('unitrack_loans_service', 'public.loans', 'university_id_verified_by', 'INSERT')

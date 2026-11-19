@@ -58,6 +58,17 @@ to prove it is idempotent, runs `verify_C430PRJCT-40.sql`, and runs
 Equipment connected as their restricted 006 group roles. That test creates its
 own synthetic lab, kits, components and reservations.
 
+**Synthetic permission (not LJ's migration).** Handover marks the reservation
+`fulfilled`, which needs `UPDATE (status)` on `public.reservations` for the
+Loans group. That grant belongs to LJ's S2-01 reservation-write migration,
+which does not exist yet. The handover integration test (and
+`handover-manual.ps1 -Action Setup`) therefore applies
+`SYNTHETIC_s2-01_reservation_status_grant.sql` — that one column grant, nothing
+else — after `verify_C430PRJCT-40.sql` has confirmed that the S2-09 migration
+alone grants no status update. Passing tests with this stand-in does **not**
+verify LJ's final migration. The test's `cancelUnderContract` helper and its
+COMMIT-fault trigger are also test-only.
+
 `handover-manual.ps1` (with `manual_service_logins.sql` and
 `handover_manual_fixture.sql`) prepares a separate disposable database for
 clicking through `/handover/[reservationId]`, with each service connecting as its

@@ -2,7 +2,16 @@
 // Loans runs as the restricted unitrack_loans_service group and Equipment as
 // unitrack_equipment_service, after migrations 003-006 and the S2-09 migration.
 // All rows below are synthetic and created by this file.
-import { Pool } from "pg";
+//
+// SYNTHETIC PERMISSION: beforeAll applies database/local-test/
+// SYNTHETIC_s2-01_reservation_status_grant.sql (GRANT UPDATE (status) ON
+// reservations TO unitrack_loans_service), a stand-in for LJ's future S2-01
+// migration so handover can mark reservations fulfilled. These tests verify
+// S2-09 against that stand-in ONLY; they do not verify LJ's final migration.
+// "cancelUnderContract" below is likewise a reference sketch of the PROPOSED
+// coordination contract, not LJ's implementation.
+import { readFileSync } from "node:fs";
+import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { isEligibleBorrower, type UserIdentity } from "@unitrack/contracts";
 import { EquipmentStatusConflictError, IdempotencyKeyConflictError, updateEquipmentStatus } from "../../equipment/lib/equipment-status-transaction";
@@ -32,8 +41,8 @@ const id = (suffix: string) => "00000000-0000-4000-8000-" + suffix.padStart(12, 
 const labId = 7201;
 const assistantId = id("901"), borrowerId = id("902"), inactiveBorrowerId = id("903"), otherAssistantId = id("904"), otherLabStudentId = id("905");
 const otherLabId = 7202;
-const items = { tc31: id("911"), tc34: id("912"), tc35: id("913"), tc37: id("914"), outage: id("915"), laterChange: id("916"), laterAba: id("918"), overlap: id("917"), finalCancel: id("931"), finalOverlap: id("932"), inactive: id("933"), interrupted: id("934"), componentChange: id("935"), availableRace: id("936"), nonStudent: id("951"), otherLab: id("952"), dateEdit: id("953"), noIdCheck: id("954") };
-const reservations = { tc31: id("921"), tc34: id("922"), tc35: id("923"), tc37: id("924"), outage: id("925"), laterChange: id("926"), laterAba: id("929"), overlap: id("927"), finalCancel: id("941"), finalOverlap: id("942"), inactive: id("943"), interrupted: id("944"), componentChange: id("945"), availableRace: id("946"), nonStudent: id("961"), otherLab: id("962"), dateEdit: id("963"), noIdCheck: id("964") };
+const items = { commitFault: id("937"), fulfilRevoke: id("938"), noGrant: id("939"), itemLock: id("955"), cancelContract: id("956"), tc31: id("911"), tc34: id("912"), tc35: id("913"), tc37: id("914"), outage: id("915"), laterChange: id("916"), laterAba: id("918"), overlap: id("917"), finalCancel: id("931"), finalOverlap: id("932"), inactive: id("933"), interrupted: id("934"), componentChange: id("935"), availableRace: id("936"), nonStudent: id("951"), otherLab: id("952"), dateEdit: id("953"), noIdCheck: id("954") };
+const reservations = { commitFault: id("947"), fulfilRevoke: id("948"), noGrant: id("967"), itemLock: id("965"), cancelContract: id("966"), tc31: id("921"), tc34: id("922"), tc35: id("923"), tc37: id("924"), outage: id("925"), laterChange: id("926"), laterAba: id("929"), overlap: id("927"), finalCancel: id("941"), finalOverlap: id("942"), inactive: id("943"), interrupted: id("944"), componentChange: id("945"), availableRace: id("946"), nonStudent: id("961"), otherLab: id("962"), dateEdit: id("963"), noIdCheck: id("964") };
 /** Reservation borrower per case (default: the active same-lab student). */
 const borrowerFor: Partial<Record<keyof typeof reservations, string>> = { inactive: inactiveBorrowerId, nonStudent: otherAssistantId, otherLab: otherLabStudentId };
 const overlapSecondReservation = id("928");
@@ -112,6 +121,42 @@ async function submit(reservation: string, input: Record<string, unknown>, as: U
   // The assistant's physical university-ID check is ticked unless a test overrides it.
   return confirmHandover(reservation, { checklistVersion, universityIdVerified: true, ...input }, as, ports);
 }
+const SYNTHETIC_GRANT = readFileSync(new URL("../../../database/local-test/SYNTHETIC_s2-01_reservation_status_grant.sql", import.meta.url), "utf8");
+/** SYNTHETIC stand-in for LJ's S2-01 UPDATE (status) grant (see file header). */
+const grantSyntheticStatus = () => admin.query(SYNTHETIC_GRANT);
+const revokeSyntheticStatus = () => admin.query("REVOKE UPDATE (status) ON public.reservations FROM unitrack_loans_service");
+const reservationRow = async (reservation: string) => (await admin.query<{ status: string; state: string | null }>(
+  "select status, handover_operation ->> 'state' as state from public.reservations where id = $1", [reservation])).rows[0];
+/**
+ * REFERENCE SKETCH of the PROPOSED cancellation contract (docs/handover-s2-09.md),
+ * run as the restricted Loans role with the synthetic grant. Not LJ's code.
+ * Same lock order as handover: item lock, then reservation row; cancel only a
+ * confirmed reservation with no loan and no unfinished/completed handover.
+ */
+async function cancelUnderContract(reservation: string): Promise<"cancelled" | "blocked"> {
+  const client: PoolClient = await loansPool.connect();
+  try {
+    await client.query("BEGIN");
+    const { item_id } = (await client.query("select item_id from public.reservations where id = $1", [reservation])).rows[0];
+    await client.query("select pg_advisory_xact_lock(hashtextextended('loans:item:' || $1::uuid::text, 0))", [item_id]);
+    const row = (await client.query<{ status: string; state: string | null; item_id: string }>(
+      "select status, item_id, handover_operation ->> 'state' as state from public.reservations where id = $1 for update", [reservation])).rows[0];
+    const loan = (await client.query("select 1 from public.loans where reservation_id = $1", [reservation])).rows.length > 0;
+    if (row.item_id !== item_id || row.status !== "confirmed" || loan || (row.state !== null && row.state !== "compensated")) { await client.query("ROLLBACK"); return "blocked"; }
+    await client.query("update public.reservations set status = 'cancelled' where id = $1", [reservation]);
+    await client.query("COMMIT");
+    return "cancelled";
+  } catch (error) { await client.query("ROLLBACK"); throw error; }
+  finally { client.release(); }
+}
+/** A destroyed connection releases its session lock asynchronously; wait for it. */
+async function advisoryLocksReleased() {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if ((await admin.query<{ n: number }>("select count(*)::int as n from pg_locks where locktype = 'advisory'")).rows[0].n === 0) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error("Advisory locks were not released");
+}
 const itemStatus = async (item: string) => (await admin.query<{ status: string }>("select status from public.equipment_items where id = $1", [item])).rows[0].status;
 const loansFor = async (reservation: string) => (await admin.query("select * from public.loans where reservation_id = $1", [reservation])).rows;
 const pickupFor = async (loan: string) => (await admin.query("select * from public.condition_records where loan_id = $1 and phase = 'pickup' order by kit_component_id nulls first", [loan])).rows;
@@ -124,6 +169,7 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     equipmentPool = restricted("unitrack_equipment_service");
     usersPool = restricted("unitrack_users_service");
     database.pool = loansPool;
+    await grantSyntheticStatus();
     // Synthetic fixtures owned by this test file (fresh tmpfs container each run).
     await admin.query("insert into auth.users (id) values ($1), ($2), ($3), ($4), ($5) on conflict do nothing", [assistantId, borrowerId, inactiveBorrowerId, otherAssistantId, otherLabStudentId]);
     await admin.query("insert into public.labs (id, code, name) overriding system value values ($1, 'S2-09-TEST', 'Disposable Handover Lab'), ($2, 'S2-09-OTHER', 'Other Disposable Lab') on conflict do nothing", [labId, otherLabId]);
@@ -178,7 +224,12 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     const history = await admin.query("select old_status, new_status, request_key from public.equipment_status_history where item_id = $1", [items.tc31]);
     expect(history.rows).toEqual([{ old_status: "reserved", new_status: "checked_out", request_key: expect.stringMatching(/^handover:.+:0:apply$/) }]);
 
+    // PO decision: the same transaction marked the reservation fulfilled.
+    expect(await reservationRow(reservations.tc31)).toEqual({ status: "fulfilled", state: "completed" });
+
+    // Completed retry: same result although the reservation is now fulfilled.
     expect(await submit(reservations.tc31, input)).toEqual(result);
+    expect(await recoverHandover(reservations.tc31, otherAssistant, ports)).toEqual(result);
     expect(await loansFor(reservations.tc31)).toHaveLength(1);
     expect(await pickupFor(result.loanId)).toHaveLength(6);
     expect((await getHandoverDetails(reservations.tc31, labId, assistantId))?.handover?.pickupConditions).toHaveLength(6);
@@ -186,6 +237,10 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     // Existing Return accepts this pickup shape (main row + every pickup component).
     const returned = await confirmReturn(result.loanId, { conditions: [{ kitComponentId: null, conditionStatus: "good" }, ...componentIds(items.tc31).map(kitComponentId => ({ kitComponentId, conditionStatus: "good" }))] }, actor, equipment);
     expect(returned).toMatchObject({ status: "available", isLate: false });
+    // Return leaves the reservation fulfilled; a late retry still replays the result, writing nothing.
+    expect(await reservationRow(reservations.tc31)).toEqual({ status: "fulfilled", state: "completed" });
+    expect(await submit(reservations.tc31, input)).toEqual(result);
+    expect((await admin.query("select count(*)::int as n from public.equipment_status_history where item_id = $1", [items.tc31])).rows[0].n).toBe(2);
   });
 
   it("TC-3.4: a missing charger is stored as missing with its note", async () => {
@@ -308,7 +363,11 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     const plan = (await admin.query("select handover_operation as op from public.reservations where id = $1", [reservations.interrupted])).rows[0].op;
     expect(plan).toMatchObject({ state: "applied", actor: assistantId });
     expect(plan.conditions).toHaveLength(6);
+    // Unfinished ('applied') handover: cancellation is blocked (proposed contract sketch).
+    expect(await cancelUnderContract(reservations.interrupted)).toBe("blocked");
+    expect(await reservationRow(reservations.interrupted)).toEqual({ status: "confirmed", state: "applied" });
     const result = await recoverHandover(reservations.interrupted, otherAssistant, ports);
+    expect(await reservationRow(reservations.interrupted)).toEqual({ status: "fulfilled", state: "completed" });
     expect(result.status).toBe("checked_out");
     const pickup = await pickupFor(result.loanId);
     expect(pickup).toHaveLength(6);
@@ -391,10 +450,99 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     await expect(loansPool.query("update public.condition_records set notes = 'edited' where loan_id = $1", [loan.id])).rejects.toMatchObject({ code: "42501" });
     await expect(loansPool.query("delete from public.condition_records where loan_id = $1", [loan.id])).rejects.toMatchObject({ code: "42501" });
     await expect(loansPool.query("delete from public.loans where id = $1", [loan.id])).rejects.toMatchObject({ code: "42501" });
-    await expect(loansPool.query("update public.reservations set status = 'cancelled' where id = $1", [reservations.tc34])).rejects.toMatchObject({ code: "42501" });
+    // The S2-09 migration ALONE grants no reservation status update (the synthetic S2-01 stand-in is removed for this check).
+    await revokeSyntheticStatus();
+    try { await expect(loansPool.query("update public.reservations set status = 'cancelled' where id = $1", [reservations.tc34])).rejects.toMatchObject({ code: "42501" }); }
+    finally { await grantSyntheticStatus(); }
     await expect(loansPool.query("insert into public.loans (item_id, borrower_id, lab_id, due_date) values ($1, $2, $3, now() + interval '1 day')", [items.tc35, borrowerId, labId])).rejects.toMatchObject({ code: "42501" });
     // RLS: a confirmed loan without the assistant's ID check is refused too.
     await expect(loansPool.query("insert into public.loans (item_id, borrower_id, lab_id, due_date, student_confirmed_at) values ($1, $2, $3, now() + interval '1 day', now())", [items.tc35, borrowerId, labId])).rejects.toMatchObject({ code: "42501" });
     await expect(equipmentPool.query("select student_confirmed_at from public.loans")).rejects.toMatchObject({ code: "42501" });
+  });
+
+  // ---- PO decision: fulfilment is atomic with the loan and pickup records ----
+
+  it("fulfilment refused in the final transaction (status permission removed after checkout): loan and pickup records roll back with it; checkout undone; then cancellation may resume", async () => {
+    const item = items.fulfilRevoke, reservation = reservations.fulfilRevoke;
+    hooks.afterApply = async () => { await revokeSyntheticStatus(); };
+    try {
+      await expect(submit(reservation, { studentConfirmed: true, conditions: kitChecklist(item) })).rejects.toMatchObject({ status: 503, code: "handover_rolled_back" });
+    } finally { await grantSyntheticStatus(); }
+    expect(await reservationRow(reservation)).toEqual({ status: "confirmed", state: "compensated" });
+    expect(await loansFor(reservation)).toHaveLength(0);
+    expect((await admin.query("select count(*)::int as n from public.condition_records where item_id = $1", [item])).rows[0].n).toBe(0);
+    expect(await itemStatus(item)).toBe("reserved");
+    const history = await admin.query<{ new_status: string; request_key: string }>("select new_status, request_key from public.equipment_status_history where item_id = $1 order by id", [item]);
+    expect(history.rows.map(r => r.new_status)).toEqual(["checked_out", "reserved"]);
+    // Only a CONFIRMED rollback ('compensated') releases the cancellation restriction.
+    expect(await cancelUnderContract(reservation)).toBe("cancelled");
+    expect((await reservationRow(reservation)).status).toBe("cancelled");
+  });
+
+  it("final COMMIT fails (SYNTHETIC deferred fault trigger): no fulfilled reservation without its loan and records; outcome uncertain; recovery fulfils all together", async () => {
+    const item = items.commitFault, reservation = reservations.commitFault;
+    // Test-only fault injection: raises at COMMIT, after the loan, pickup records and fulfilment were written.
+    await admin.query(`create or replace function public.s209_test_commit_fault() returns trigger language plpgsql as $$
+      begin raise exception 'S2-09 synthetic COMMIT fault'; end; $$`);
+    await admin.query(`create constraint trigger s209_test_commit_fault after update on public.reservations
+      deferrable initially deferred for each row when (new.id = '${reservation}'::uuid and new.status = 'fulfilled')
+      execute function public.s209_test_commit_fault()`);
+    try {
+      await expect(submit(reservation, { studentConfirmed: true, conditions: kitChecklist(item) })).rejects.toMatchObject({ code: "handover_state_uncertain" });
+    } finally {
+      await admin.query("drop trigger s209_test_commit_fault on public.reservations");
+      await admin.query("drop function public.s209_test_commit_fault()");
+    }
+    expect(await reservationRow(reservation)).toEqual({ status: "confirmed", state: "applied" });
+    expect(await loansFor(reservation)).toHaveLength(0);
+    expect((await admin.query("select count(*)::int as n from public.condition_records where item_id = $1", [item])).rows[0].n).toBe(0);
+    expect(await itemStatus(item)).toBe("checked_out");
+    // Uncertain/unfinished: cancellation stays blocked (no timeout releases it).
+    expect(await cancelUnderContract(reservation)).toBe("blocked");
+    await advisoryLocksReleased();
+    const result = await recoverHandover(reservation, actor, ports);
+    expect(await reservationRow(reservation)).toEqual({ status: "fulfilled", state: "completed" });
+    expect(await loansFor(reservation)).toEqual([expect.objectContaining({ id: result.loanId })]);
+    expect(await pickupFor(result.loanId)).toHaveLength(6);
+    expect((await admin.query("select count(*)::int as n from public.equipment_status_history where item_id = $1", [item])).rows[0].n).toBe(1);
+    // Fulfilled reservations cannot be cancelled.
+    expect(await cancelUnderContract(reservation)).toBe("blocked");
+  });
+
+  it("without the S2-01 status permission (S2-09 migration alone): 503 before any plan or Equipment change", async () => {
+    await revokeSyntheticStatus();
+    try {
+      await expect(submit(reservations.noGrant, { studentConfirmed: true, conditions: kitChecklist(items.noGrant) })).rejects.toMatchObject({ status: 503, code: "reservation_fulfillment_unavailable" });
+    } finally { await grantSyntheticStatus(); }
+    expect(await reservationRow(reservations.noGrant)).toEqual({ status: "confirmed", state: null });
+    expect(await itemStatus(items.noGrant)).toBe("reserved");
+    expect((await admin.query("select count(*)::int as n from public.equipment_status_history where item_id = $1", [items.noGrant])).rows[0].n).toBe(0);
+  });
+
+  it("common per-item lock: a writer holding the SQL-form key 'loans:item:' || item_id blocks handover until it commits", async () => {
+    const holder = await admin.connect();
+    let settled = false;
+    try {
+      await holder.query("BEGIN");
+      await holder.query("select pg_advisory_xact_lock(hashtextextended('loans:item:' || $1::uuid::text, 0))", [items.itemLock]);
+      const pending = submit(reservations.itemLock, { studentConfirmed: true, conditions: kitChecklist(items.itemLock) }).finally(() => { settled = true; });
+      await new Promise(resolve => setTimeout(resolve, 400));
+      expect(settled).toBe(false);
+      expect((await admin.query<{ n: number }>("select count(*)::int as n from pg_locks where locktype = 'advisory' and not granted")).rows[0].n).toBe(1);
+      expect((await admin.query("select count(*)::int as n from public.equipment_status_history where item_id = $1", [items.itemLock])).rows[0].n).toBe(0);
+      await holder.query("COMMIT");
+      expect((await pending).status).toBe("checked_out");
+    } finally { holder.release(); }
+    expect(await reservationRow(reservations.itemLock)).toEqual({ status: "fulfilled", state: "completed" });
+  });
+
+  it("proposed cancellation contract (reference sketch): blocked while a handover is planned, blocked once fulfilled", async () => {
+    const item = items.cancelContract, reservation = reservations.cancelContract;
+    let during: string | undefined;
+    hooks.afterApply = async () => { during = await cancelUnderContract(reservation); };
+    await submit(reservation, { studentConfirmed: true, conditions: kitChecklist(item) });
+    expect(during).toBe("blocked");
+    expect(await reservationRow(reservation)).toEqual({ status: "fulfilled", state: "completed" });
+    expect(await cancelUnderContract(reservation)).toBe("blocked");
   });
 });

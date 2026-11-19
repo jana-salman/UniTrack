@@ -14,7 +14,18 @@ import { LoansError, handoverUncertain } from "../errors";
 import type { BorrowerPort } from "../users-http";
 import type { HandoverEquipmentPort, HandoverKitComponent } from "./equipment-port";
 import { HandoverRuleError, checkFullEligibility, confirmationCoversMissing, validateHandoverChecklist, validateHandoverInput } from "./rules";
-import { saveHandoverRecordsInTransaction } from "./save-records";
+import { fulfilReservationInTransaction, saveHandoverRecordsInTransaction } from "./save-records";
+
+/**
+ * Common per-item lock shared with every Loans writer of reservations for the
+ * same item (coordination contract in docs/handover-s2-09.md). Transaction-
+ * scoped; ALWAYS taken BEFORE any reservation row lock. SQL equivalent:
+ *   pg_advisory_xact_lock(hashtextextended('loans:item:' || item_id::text, 0))
+ * (uuid::text is lower case, matching this key).
+ */
+export const itemLockKey = (itemId: string) => "loans:item:" + itemId.toLowerCase();
+/** Per-reservation SESSION lock (try only, never waits): one handover request at a time. */
+export const handoverLockKey = (reservationId: string) => "loans:handover:" + reservationId.toLowerCase();
 
 type PriorStatus = "reserved" | "available";
 export interface HandoverOperation {
@@ -44,6 +55,7 @@ interface ReservationRow {
 export interface HandoverPorts { equipment: HandoverEquipmentPort; users: BorrowerPort }
 
 const conflict = (message: string) => new LoansError(409, "handover_conflict", message);
+const fulfillmentUnavailable = () => new LoansError(503, "reservation_fulfillment_unavailable", "Handover is not available yet: reservations cannot be marked fulfilled. Nothing was changed. Ask an administrator.");
 const incomplete = () => new LoansError(503, "handover_incomplete", "The equipment is checked out but the handover is not finished. Use Finish interrupted handover to complete or undo it.");
 const starterOnly = () => conflict("Only the assistant who started this handover can finish or undo it. Ask them, or ask a lab manager to reconcile.");
 const COMPONENTS_CHANGED = "The equipment's component list changed. Reload the checklist and check it again.";
@@ -115,11 +127,15 @@ export function recoverHandover(reservationId: string, actor: UserIdentity, port
  * 3. Equipment checkout with a stable key (expectedStatus = observed prior
  *    status). Lost responses are replayed with the SAME key.
  * 4. After checkout, borrower and component version are re-verified over HTTP,
- *    then one local transaction re-verifies eligibility on locked rows and
- *    inserts the loan and every pickup record.
+ *    then ONE local transaction re-verifies eligibility on locked rows,
+ *    inserts the loan and every pickup record, and marks the reservation
+ *    `fulfilled` with the completed operation. All or nothing.
  * 5. Definitive ineligibility or an acknowledged rollback permits only the
  *    ownership-guarded undo. Unavailable services after checkout leave a
  *    recoverable 'applied' plan (handover_incomplete), never a false success.
+ *
+ * Lock order (every transaction here): item advisory xact lock, THEN the
+ * reservation row (FOR UPDATE). The per-reservation session lock is try-only.
  */
 async function runHandover(reservationId: string, actor: UserIdentity, ports: HandoverPorts, mode: Mode): Promise<HandoverOutcome> {
   const { equipment, users } = ports;
@@ -141,7 +157,7 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
     if (!confirmationCoversMissing(input)) throw new LoansError(400, "student_confirmation_required", "The student's confirmation must include every item recorded as missing. Ask the student to confirm again.");
     fingerprint = createHash("sha256").update(JSON.stringify({ actor: actor.sub, reservationId, input })).digest("hex");
   }
-  const lockKey = "loans:handover:" + reservationId;
+  const lockKey = handoverLockKey(reservationId);
 
   const client = await getDatabasePool().connect();
   let locked = false, transaction = false, broken = false;
@@ -160,20 +176,30 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
     const saved = await client.query("update public.reservations set handover_operation = $1::jsonb where id = $2 and lab_id = $3 returning id", [JSON.stringify(op), reservationId, actor.lab_id]);
     if (saved.rows.length !== 1) throw handoverUncertain();
   }
-  async function selectReservation(): Promise<ReservationRow | undefined> {
-    return (await client.query<ReservationRow>(
+  /**
+   * Inside the caller's transaction: the common per-item lock FIRST, then the
+   * reservation row FOR UPDATE (canonical order shared with reservation
+   * writers, so the two can never deadlock). The item is read unlocked only to
+   * name the lock; a different item under the row lock is a reservation change.
+   */
+  async function lockReservation(): Promise<ReservationRow | undefined> {
+    const peek = (await client.query<{ item_id: string }>(
+      "select item_id from public.reservations where id = $1 and lab_id = $2", [reservationId, actor.lab_id])).rows[0];
+    if (!peek) return undefined;
+    await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [itemLockKey(peek.item_id)]);
+    const row = (await client.query<ReservationRow>(
       "select id, item_id, borrower_id, lab_id, start_at, end_at, status, handover_operation from public.reservations where id = $1 and lab_id = $2 for update",
       [reservationId, actor.lab_id])).rows[0];
+    if (row && row.item_id !== peek.item_id) throw conflict(RESERVATION_CHANGED);
+    return row;
   }
   /**
-   * SC eligibility on LOCKED state, inside the caller's transaction. The item
-   * advisory lock serializes handovers for DIFFERENT reservations of the same
-   * item (the per-reservation session lock cannot), so the active-loan and
-   * single-eligible-reservation counts cannot change between check and insert
-   * through this service. Other reservation writers are NOT covered (see docs).
+   * SC eligibility on LOCKED state; the caller holds the item lock and the row
+   * lock (lockReservation). The item lock serializes handovers for DIFFERENT
+   * reservations of the same item (the per-reservation session lock cannot),
+   * and every reservation writer that follows the coordination contract.
    */
   async function lockedEligibility(row: ReservationRow, now: Date): Promise<void> {
-    await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", ["loans:handover:item:" + row.item_id]);
     const active = await client.query<{ count: number }>("select count(*)::int as count from public.loans where item_id = $1 and returned_at is null", [row.item_id]);
     const eligible = await client.query<{ count: number }>("select count(*)::int as count from public.reservations where item_id = $1 and status = 'confirmed' and start_at <= $2 and end_at > $2", [row.item_id, now]);
     try { checkFullEligibility(row, now, active.rows[0]?.count ?? 0, eligible.rows[0]?.count ?? 0); }
@@ -193,14 +219,17 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
     if (!lock.rows[0]?.locked) throw conflict("A handover is already in progress. Retry the same information later.");
     locked = true;
     await begin();
-    const reservation = await selectReservation();
+    const reservation = await lockReservation();
     if (!reservation) throw new LoansError(404, "reservation_not_found", "Reservation not found.");
     let op = reservation.handover_operation;
     if (op && !validOperation(op, reservationId)) throw handoverUncertain();
     const existing = await client.query<{ id: string }>("select id from public.loans where reservation_id = $1", [reservationId]);
     const existingLoan = existing.rows[0]?.id ?? null;
     if (op?.state === "completed") {
-      if (existingLoan !== op.result.loanId) throw handoverUncertain();
+      // Completed = fulfilled + this loan, committed together. Anything else is
+      // an inconsistency for staff, never a success. A retry is answered from
+      // the stored result although the reservation is no longer `confirmed`.
+      if (existingLoan !== op.result.loanId || reservation.status !== "fulfilled") throw handoverUncertain();
       // Exact replay (double click/retry) or recovery of a finished handover.
       if (mode.kind === "submit" && op.fingerprint !== fingerprint) throw conflict("This reservation has already been handed over.");
       await commit();
@@ -228,6 +257,10 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
     if (!op || op.state === "compensated") {
       // Equipment is known NOT to hold our checkout here, so every check may
       // refuse safely before contacting Equipment.
+      // The final transaction must mark the reservation fulfilled. Without that
+      // permission (LJ's S2-01 grant) refuse NOW rather than check out and undo.
+      const permission = await client.query<{ allowed: boolean }>("select has_column_privilege('public.reservations', 'status', 'UPDATE') as allowed");
+      if (permission.rows[0]?.allowed !== true) throw fulfillmentUnavailable();
       const now = new Date();
       await lockedEligibility(reservation, now);
       await users.verifyBorrower(reservation.borrower_id, reservation.lab_id);
@@ -280,11 +313,13 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
       if (operation.actor !== actor.sub) throw starterOnly();
       operation.state = "compensating";
       await persist(operation);
-      // Hold the reservation row through undo so another Loans writer cannot
-      // complete this handover between the loan check and the undo.
+      // Hold the item lock and reservation row through undo so another Loans
+      // writer cannot complete this handover (or cancel the reservation) between
+      // the loan check and the undo.
       await begin();
-      const row = await client.query("select id from public.reservations where id = $1 and lab_id = $2 for update", [reservationId, actor.lab_id]);
-      if (!row.rows.length || await loanExists(operation.result.loanId)) throw handoverUncertain();
+      // The checkout is still outstanding here: any surprise is uncertain, not a plain conflict.
+      const row = await lockReservation().catch(() => { throw handoverUncertain(); });
+      if (!row || await loanExists(operation.result.loanId)) throw handoverUncertain();
       try { await change(operation, true); }
       catch { throw handoverUncertain(); }
       operation.state = "compensated";
@@ -330,7 +365,9 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
       try {
         // Final submission: re-verify every SC rule on fresh, locked rows at the
         // server's current time before creating the loan.
-        const fresh = await selectReservation();
+        let fresh: ReservationRow | undefined;
+        try { fresh = await lockReservation(); }
+        catch (error) { ineligible = error instanceof LoansError ? error : conflict(RESERVATION_CHANGED); throw ineligible; }
         // Authoritative reservation: same item, borrower, lab and CONFIRMED dates.
         if (!fresh || fresh.item_id !== itemId || fresh.borrower_id !== op.result.borrowerId
           || fresh.lab_id !== reservation.lab_id || !sameWindow(fresh, op.window)) {
@@ -339,8 +376,12 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
         }
         try { await lockedEligibility(fresh, new Date()); }
         catch (error) { ineligible = error instanceof LoansError ? error : conflict("Only confirmed reservations can be handed over."); throw ineligible; }
+        // ONE transaction: loan, every pickup record, then reservation ->
+        // fulfilled together with the completed operation. Any failure rolls
+        // all of it back; a fulfilled reservation never exists without them.
         await saveHandoverRecordsInTransaction(client, op.result, actor.lab_id, op.conditions, op.actor, op.idVerifiedBy);
-        op.state = "completed"; await persist(op);
+        await fulfilReservationInTransaction(client, op.result, actor.lab_id, { ...op, state: "completed" });
+        op.state = "completed";
         saved = true;
       } catch {
         if (!(await rollback())) throw handoverUncertain();

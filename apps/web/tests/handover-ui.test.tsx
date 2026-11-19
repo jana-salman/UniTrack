@@ -288,3 +288,28 @@ it("after reconfirming the changed checklist, the handover saves exactly what wa
   expect(fixture.db.state.records.find(r => r.kit_component_id === kitComponents[0].id)).toMatchObject({ condition_status: "missing", notes: "Lost before pickup" });
   expect(loanPosts()).toHaveLength(1);
 });
+
+it("fulfilment not permitted yet (S2-01 grant missing): shown as a definite failure, nothing handed over, no uncertain notice", async () => {
+  await open();
+  for (const row of rows()) await fillRow(row);
+  await confirmBoth();
+  fixture.db.settings.noFulfillmentGrant = true;
+  await submit();
+  await waitForUi(() => expect(host.textContent).toContain("reservations cannot be marked fulfilled"));
+  expect(host.querySelector('[data-testid="handover-uncertain"]')).toBeNull();
+  expect(host.textContent).not.toContain("outcome uncertain");
+  expect(fixture.db.state.loans).toHaveLength(0); expect(fixture.status).toBe("reserved"); expect(fixture.history).toHaveLength(0);
+  expect(fixture.db.state.reservation.status).toBe("confirmed");
+});
+
+it("after a completed handover the reservation is fulfilled and the page shows the completed handover, not an eligibility error", async () => {
+  await open();
+  for (const row of rows()) await fillRow(row);
+  await confirmBoth();
+  await submit();
+  await waitForUi(() => expect(host.textContent).toContain("Handover complete"));
+  expect(fixture.db.state.reservation.status).toBe("fulfilled");
+  // The page re-reads Loans after completion: it renders the saved handover.
+  await waitForUi(() => expect(host.textContent).toContain("Condition at pickup"));
+  expect(host.textContent).not.toContain("Only confirmed reservations can be handed over.");
+});

@@ -1,5 +1,5 @@
 // S2-09 / C430PRJCT-40 handover Saga. Modeled database + Equipment/Users ports.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserIdentity } from "@unitrack/contracts";
 import type { EquipmentStatus, ReturnStatusChange } from "../lib/returns/equipment-port";
 import type { HandoverKitComponent } from "../lib/handover/equipment-port";
@@ -457,10 +457,20 @@ describe("SC eligibility rules, at plan time and independently at final submissi
     db.state.otherReservations.push(overlapping(patch));
     expect((await confirm()).status).toBe("checked_out"); expect(db.state.loans).toHaveLength(1);
   });
-  it("takes the per-item lock in both the plan and the final transaction", async () => {
+  it("takes the common per-item lock BEFORE the reservation row lock, in the plan and the final transaction", async () => {
     await confirm();
     const locks = db.sql.filter(q => q.text.includes("pg_advisory_xact_lock"));
-    expect(locks).toHaveLength(2); expect(locks.every(q => q.values[0] === "loans:handover:item:" + kitItemId)).toBe(true);
+    expect(locks).toHaveLength(2); expect(locks.every(q => q.values[0] === "loans:item:" + kitItemId)).toBe(true);
+    const rowLocks = db.sql.map((q, i) => [q, i] as const).filter(([q]) => q.text.includes("for update"));
+    expect(rowLocks).toHaveLength(2);
+    for (const [, index] of rowLocks) {
+      // Within the same transaction, the item lock precedes the row lock.
+      const before = db.sql.slice(0, index).reverse();
+      expect(before.findIndex(q => q.text.includes("pg_advisory_xact_lock"))).toBeLessThan(before.findIndex(q => q.text === "BEGIN"));
+    }
+    // The per-reservation lock is a non-blocking SESSION lock, released at the end.
+    expect(db.sql.filter(q => q.text.includes("pg_try_advisory_lock")).map(q => q.values[0])).toEqual(["loans:handover:" + reservationId]);
+    expect(db.sql.at(-1)).toMatchObject({ text: expect.stringContaining("pg_advisory_unlock"), values: ["loans:handover:" + reservationId] });
   });
   it.each([
     ["reservation cancelled", () => { db.state.reservation.status = "cancelled"; }, "Only confirmed reservations can be handed over."],
@@ -645,5 +655,146 @@ describe("PO decisions (JS): borrower eligibility, physical university-ID check,
     expect(calls).toHaveLength(1);
     const result = await confirm(); // the SAME information resumes the SAME key
     expect(calls).toHaveLength(2); expect(calls[1]).toEqual(calls[0]); expect(result.status).toBe("checked_out"); expect(db.state.loans).toHaveLength(1);
+  });
+});
+
+describe("PO decision (JS/ZZ): handover fulfils the reservation atomically with the loan and pickup records", () => {
+  const reservation = () => db.state.reservation;
+  /** Statements of the transaction that inserted the loan (BEGIN..COMMIT). */
+  const finalTransaction = () => {
+    const insert = db.sql.findIndex(q => q.text.includes("insert into public.loans"));
+    const begin = db.sql.slice(0, insert).map(q => q.text).lastIndexOf("BEGIN");
+    const commit = db.sql.findIndex((q, i) => i > insert && q.text === "COMMIT");
+    return db.sql.slice(begin, commit + 1).map(q => q.text);
+  };
+
+  it("success: loan, every pickup record and `fulfilled` are written in ONE transaction, fulfilment last", async () => {
+    const result = await confirm();
+    expect(reservation().status).toBe("fulfilled");
+    expect(reservation().handover_operation).toMatchObject({ state: "completed", result });
+    expect(db.state.loans).toHaveLength(1); expect(db.state.records).toHaveLength(6);
+    const tx = finalTransaction();
+    expect(tx[0]).toBe("BEGIN"); expect(tx.at(-1)).toBe("COMMIT");
+    const loan = tx.findIndex(t => t.includes("insert into public.loans"));
+    const records = tx.map((t, i) => [t, i] as const).filter(([t]) => t.includes("insert into public.condition_records")).map(([, i]) => i);
+    const fulfil = tx.findIndex(t => t.includes("set status = 'fulfilled'"));
+    expect(records).toHaveLength(6); expect(loan).toBeLessThan(Math.min(...records)); expect(Math.max(...records)).toBeLessThan(fulfil);
+    // The completed operation is stored by the fulfilment statement itself, not separately.
+    expect(tx.filter(t => t.startsWith("update public.reservations set handover_operation"))).toHaveLength(0);
+    expect(db.sql.find(q => q.text.includes("set status = 'fulfilled'"))?.values.slice(1)).toEqual([reservationId, labId, kitItemId, borrowerId]);
+    // The confirmed dates were compared on the row locked FOR UPDATE earlier in this transaction.
+    expect(tx.findIndex(t => t.includes("for update"))).toBeLessThan(loan);
+  });
+
+  it.each(["error", "zero"] as const)("fulfilment failure (%s): loan and pickup records roll back too; checkout undone; reservation stays confirmed; same retry completes", async failure => {
+    db.settings.fulfilFailure = failure;
+    await expect(confirm()).rejects.toMatchObject({ status: 503, code: "handover_rolled_back" });
+    nothingSaved(); expect(reservation().status).toBe("confirmed"); expect(opState()).toBe("compensated"); expect(status).toBe("reserved");
+    expect(calls.map(c => c.idempotencyKey.split(":").at(-1))).toEqual(["apply", "undo"]);
+    db.settings.fulfilFailure = "";
+    const result = await confirm();
+    expect(reservation().status).toBe("fulfilled"); expect(db.state.loans).toEqual([expect.objectContaining({ id: result.loanId })]); expect(db.state.records).toHaveLength(6);
+  });
+
+  it.each(["before", "after"] as const)("uncertain final COMMIT (%s): never a fulfilled reservation without its loan and records (or the reverse); retry reconciles", async mode => {
+    db.settings.commitFailure = mode;
+    await expect(confirm()).rejects.toMatchObject({ code: "handover_state_uncertain" });
+    const fulfilled = reservation().status === "fulfilled";
+    expect(fulfilled).toBe(mode === "after");
+    expect(db.state.loans).toHaveLength(fulfilled ? 1 : 0); expect(db.state.records).toHaveLength(fulfilled ? 6 : 0);
+    expect(opState()).toBe(fulfilled ? "completed" : "applied");
+    const result = await confirm();
+    expect(reservation().status).toBe("fulfilled"); expect(db.state.loans).toEqual([expect.objectContaining({ id: result.loanId })]); expect(db.state.records).toHaveLength(6);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("recovery of an interrupted ('applied') handover fulfils atomically", async () => {
+    users.verifyBorrower.mockResolvedValueOnce(verified).mockRejectedValueOnce(borrowerUnavailable());
+    await expect(confirm()).rejects.toMatchObject({ code: "handover_incomplete" });
+    expect(reservation().status).toBe("confirmed"); nothingSaved();
+    const result = await recover(otherAssistant);
+    expect(reservation().status).toBe("fulfilled"); expect(reservation().handover_operation).toMatchObject({ state: "completed", result });
+    expect(finalTransaction().some(t => t.includes("set status = 'fulfilled'"))).toBe(true);
+  });
+
+  it("recovery whose fulfilment is refused: rolled back and undone by the starter; nothing fulfilled", async () => {
+    users.verifyBorrower.mockResolvedValueOnce(verified).mockRejectedValueOnce(borrowerUnavailable());
+    await expect(confirm()).rejects.toMatchObject({ code: "handover_incomplete" });
+    db.settings.fulfilFailure = "error";
+    await expect(recover()).rejects.toMatchObject({ code: "handover_rolled_back" });
+    nothingSaved(); expect(reservation().status).toBe("confirmed"); expect(opState()).toBe("compensated"); expect(status).toBe("reserved");
+  });
+
+  it("completed retries return the SAME result although the reservation is now fulfilled (submit, recover, after return); nothing is written", async () => {
+    const first = await confirm();
+    const writes = () => db.sql.filter(q => /^(insert|update)/.test(q.text)).length;
+    const before = writes();
+    expect(await confirm()).toEqual(first);
+    expect(await recover(otherAssistant)).toEqual(first);
+    db.state.loans[0].returned_at = new Date(); // Return completed later; the reservation stays fulfilled.
+    expect(await confirm()).toEqual(first);
+    expect(writes()).toBe(before); expect(calls).toHaveLength(1); expect(reservation().status).toBe("fulfilled");
+    // Different information after completion is still refused.
+    await expect(confirm(body(goodChecklist().map((r, i) => i ? r : { ...r, notes: "changed" })))).rejects.toMatchObject({ status: 409, message: "This reservation has already been handed over." });
+  });
+
+  it("a completed operation on a reservation that is NOT fulfilled is an inconsistency, never a success", async () => {
+    await confirm();
+    reservation().status = "confirmed";
+    await expect(confirm()).rejects.toMatchObject({ code: "handover_state_uncertain" });
+    await expect(recover()).rejects.toMatchObject({ code: "handover_state_uncertain" });
+  });
+
+  it("a fulfilled reservation can never start a new handover", async () => {
+    reservation().status = "fulfilled";
+    await expect(confirm()).rejects.toMatchObject({ status: 409, message: "Only confirmed reservations can be handed over." });
+    expect(calls).toHaveLength(0); nothingSaved();
+  });
+
+  it("without the reservation status permission (LJ's S2-01 grant): 503 before any plan or Equipment change", async () => {
+    db.settings.noFulfillmentGrant = true;
+    await expect(confirm()).rejects.toMatchObject({ status: 503, code: "reservation_fulfillment_unavailable" });
+    expect(calls).toHaveLength(0); expect(equipment.getItem).not.toHaveBeenCalled(); expect(users.verifyBorrower).not.toHaveBeenCalled();
+    expect(reservation().handover_operation).toBeNull(); expect(reservation().status).toBe("confirmed"); nothingSaved();
+  });
+
+  it("re-applying after a confirmed undo re-checks the permission too", async () => {
+    db.settings.recordFailure = true;
+    await expect(confirm()).rejects.toMatchObject({ code: "handover_rolled_back" });
+    db.settings.recordFailure = false; db.settings.noFulfillmentGrant = true;
+    await expect(confirm()).rejects.toMatchObject({ code: "reservation_fulfillment_unavailable" });
+    expect(calls).toHaveLength(2); expect(opState()).toBe("compensated"); expect(status).toBe("reserved");
+  });
+});
+
+describe("PO decisions: pickup eligibility is start_at <= now < end_at; multiple eligible reservations block", () => {
+  afterEach(() => { vi.useRealTimers(); });
+  const at = (iso: string) => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(iso)); };
+
+  it("eligible exactly at start_at", async () => {
+    at("2026-11-20T09:00:00.000Z");
+    db.state.reservation.start_at = new Date("2026-11-20T09:00:00.000Z"); db.state.reservation.end_at = new Date("2026-11-21T09:00:00.000Z");
+    expect((await confirm()).dueDate).toBe("2026-11-21T09:00:00.000Z");
+    expect(db.state.reservation.status).toBe("fulfilled");
+  });
+  it("not eligible exactly at end_at, nor 1 ms before start_at", async () => {
+    db.state.reservation.start_at = new Date("2026-11-20T09:00:00.000Z"); db.state.reservation.end_at = new Date("2026-11-21T09:00:00.000Z");
+    at("2026-11-21T09:00:00.000Z");
+    await expect(confirm()).rejects.toMatchObject({ status: 409, message: "The reservation pickup window has ended." });
+    at("2026-11-20T08:59:59.999Z");
+    await expect(confirm()).rejects.toMatchObject({ status: 409, message: "The reservation pickup window has not started." });
+    expect(calls).toHaveLength(0); nothingSaved(); expect(db.state.reservation.status).toBe("confirmed");
+  });
+  it("another reservation that ENDS exactly now is not eligible, so exactly one remains and is selected automatically", async () => {
+    at("2026-11-20T12:00:00.000Z");
+    db.state.reservation.start_at = new Date("2026-11-20T10:00:00.000Z"); db.state.reservation.end_at = new Date("2026-11-21T10:00:00.000Z");
+    db.state.otherReservations.push({ id: "7c9e6679-7425-40de-944b-e07fc1f900b9", item_id: kitItemId, status: "confirmed", start_at: new Date("2026-11-20T08:00:00.000Z"), end_at: new Date("2026-11-20T12:00:00.000Z") });
+    expect((await confirm()).status).toBe("checked_out");
+    expect(db.state.reservation.status).toBe("fulfilled");
+  });
+  it("two eligible reservations: blocked with the conflict message; a client cannot choose one", async () => {
+    db.state.otherReservations.push({ id: "7c9e6679-7425-40de-944b-e07fc1f900b8", item_id: kitItemId, status: "confirmed", start_at: new Date(Date.now() - 60_000), end_at: new Date(Date.now() + 60_000) });
+    await expect(confirm({ ...body(), reservationChoice: "7c9e6679-7425-40de-944b-e07fc1f900b8" })).rejects.toMatchObject({ status: 409, message: "More than one reservation is eligible for this equipment right now. Ask staff to resolve the overlap." });
+    expect(calls).toHaveLength(0); nothingSaved(); expect(db.state.reservation.status).toBe("confirmed");
   });
 });
