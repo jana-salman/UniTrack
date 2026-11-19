@@ -551,11 +551,37 @@ when it exits. Start Web normally. `-Action Teardown` removes everything.
 
 ### Browser acceptance results (disposable database only)
 
-| Case | Result | Evidence (read-only queries on the local container) |
-|---|---|---|
-| TC-3.1 (re-run 2026-11-18, after the review fixes and A1/A2) | Pass | Reservation `…9921`: exactly **1** loan (borrower `…9902`, due date set, `student_confirmed_at` set, not returned); **6** `pickup` records = **1** main-item record (`kit_component_id` NULL) + **5** distinct records for the kit's 5 active components (Charger, Cable, Battery, Case, Tripod), all `good`, same lab, recorder set; item `checked_out`; plan state `completed`; 1 active loan on the item. |
-| TC-3.1 … TC-3.7 with the university-ID checkbox (and now fulfilment) | **Pending (NH) — not run yet** — needs a fresh `handover-manual.ps1 -Action Setup` (the earlier manual database predated the ID columns and fulfilment) | Automated coverage only; full `run.ps1` passes (2026-11-19). |
-| TC-3.4, TC-3.5, TC-3.7 | Pass (before the review fixes) | Missing charger saved as `missing` with its note; existing damage saved as `damaged` with its note and no photo; without confirmation the reservation stayed reserved and no loan was saved. Since then covered by the automated A1 and confirmation tests above; not re-run in the browser. |
+**Run of 2026-11-19 (NH)** — fresh `handover-manual.ps1 -Action Setup` with
+migrations 003–006, the S2-09 migration and the **SYNTHETIC local S2-01 status
+grant** (not LJ's migration). Every service connected as its restricted local
+login. "Browser" lists only what NH reported seeing; "Database" lists
+read-only queries on the local container (`BEGIN READ ONLY`) after the runs.
+
+| Case | Reservation | Browser (as reported by NH) | Database (read-only, local) | Result |
+|---|---|---|---|---|
+| TC-3.1 | `…9921` (kit, 5 components) | Borrowed; six Good pickup rows | `fulfilled`, plan `completed`; exactly 1 loan for the reservation and the item, not returned, borrower = reservation's; `student_confirmed_at` set; ID check at/by set, verifier = the lab assistant; 6 `pickup` rows = main item + Charger, Cable, Battery, Case, Tripod, all `good`, no notes, recorder = the assistant, recorded at the borrow time; one `reserved → checked_out` history row with a first-attempt key | **Pass** |
+| TC-3.4 | `…9922` (kit) | Borrowed; Charger Missing with note "missing charger" | `fulfilled`, `completed`; 1 loan; ID evidence as above; 6 `pickup` rows: Charger `missing`, note "missing charger"; main item + 4 other components `good`; one checkout history row | **Pass** |
+| TC-3.5 | `…9923` (non-kit) | Borrowed; one main-item Existing damage row with its note (NH's screenshot) | `fulfilled`, `completed`; 1 loan; ID evidence as above; exactly 1 `pickup` row: main item, `damaged`, note "Scrashing on casing" (stored as entered); no photo; one checkout history row | **Pass** |
+| TC-3.7 refusals | `…9925` (kit, extra local reservation added to the manual database for this re-test) | Not submitted with the student confirmation missing; not submitted with the ID check missing | `confirmed`, no handover plan, item `reserved`; 0 loans, 0 condition records, 0 status-history rows for the item | **Pass** |
+| TC-3.7 completion | `…9924` (kit) | Completed with both boxes ticked (NH) | `fulfilled`, `completed`; 1 loan; ID evidence as above; 6 `pickup` rows, all `good`; one checkout history row | Completed (observed) |
+
+Across the lab (read-only): 0 duplicate pickup rows per loan/component, 0
+non-pickup rows, 0 loans without a reservation, 4 active loans (one per
+handed-over item).
+
+**Not confirmed in the browser in this run** (covered by automated tests only):
+confirmation reset after editing a row, page reload / retry of a completed
+handover, the uncertain-outcome and "Finish interrupted handover" screens, and
+Return of these loans.
+
+**Observed limitation (pre-existing, minor):** each loan's `due_date` equals
+the reservation's `end_at` truncated to the millisecond (here 257 µs earlier),
+because Loans passes `end_at` through a JavaScript date. Fixture times come from
+`now()` (microseconds); reservations ending on whole seconds or minutes are
+identical. Not changed in this PR.
+
+**Earlier runs (superseded; before the ID check and fulfilment):** TC-3.1 on
+2026-11-18 (1 loan, 6 pickup rows), and TC-3.4/3.5/3.7 before the review fixes.
 
 Shared Supabase was not used; no shared migration was applied.
 
@@ -580,8 +606,10 @@ Shared Supabase was not used; no shared migration was applied.
   every state in the table, fulfilled terminal, immutable dates), and the S2-02
   fixture adaptation. Until then this card's results cover only the synthetic
   stand-in and the reference sketch.
-- **Pending browser acceptance (NH):** TC-3.1 … TC-3.7 with the university-ID
-  checkbox and fulfilment on a fresh manual database.
+- **Browser acceptance (NH, 2026-11-19): done** for TC-3.1, 3.4, 3.5 and the
+  TC-3.7 refusals on a disposable database with the synthetic grant (see the
+  results table). Confirmation reset on edit and reload/retry were not checked
+  in the browser.
 - **Equipment owner (component versioning):** the post-checkout component check
   narrows but cannot remove the window before the loan COMMIT (no distributed
   transaction). Equipment has no API that edits kit components today. If one is
