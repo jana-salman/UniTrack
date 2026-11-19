@@ -57,6 +57,12 @@ try {
   Invoke-PsqlFile '/workspace/database/migrations/006_service_database_isolation.sql' 'Migration 006'
   Invoke-PsqlFile '/workspace/database/local-test/verify_006.sql' 'Migration 006 verification'
 
+  Write-Host 'Applying migration 007 custody protection locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/007_custody_record_protection.sql' 'Migration 007 custody protection'
+
+  Write-Host 'Verifying migration 007 custody protection locally...'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_007.sql' 'Migration 007 verification'
+
   Push-Location $repositoryRoot
   try {
     Write-Host 'Running the existing static migration compatibility test...'
