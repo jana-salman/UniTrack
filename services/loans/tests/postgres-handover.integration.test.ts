@@ -193,8 +193,11 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
       await admin.query("insert into public.reservations (id, item_id, borrower_id, lab_id, start_at, end_at, status) values ($1, $2, $3, $4, now() - interval '1 hour', now() + interval '7 days', 'confirmed')",
         [reservations[key as keyof typeof reservations], item, borrowerFor[key as keyof typeof reservations] ?? borrowerId, labId]);
     }
-    // Overlapping confirmed reservation for the same item (overlap rules are the reservations card's job).
-    await admin.query("insert into public.reservations (id, item_id, borrower_id, lab_id, start_at, end_at, status) values ($1, $2, $3, $4, now() - interval '1 hour', now() + interval '7 days', 'confirmed')",
+    // Same item, same window, but PENDING: LJ's S2-02 exclusion constraint
+    // (reservations_no_overlapping_confirmed) correctly refuses a second
+    // overlapping CONFIRMED row, so the overlap test below proves that refusal
+    // instead of seeding an impossible state.
+    await admin.query("insert into public.reservations (id, item_id, borrower_id, lab_id, start_at, end_at, status) values ($1, $2, $3, $4, now() - interval '1 hour', now() + interval '7 days', 'pending')",
       [overlapSecondReservation, items.overlap, borrowerId, labId]);
     // An inactive component must not be required or accepted.
     await admin.query("insert into public.kit_components (id, kit_item_id, lab_id, component_name, is_active) values ($1, $2, $3, 'Retired lens cap', false)", [id("911c9"), items.tc31, labId]);
@@ -312,30 +315,45 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     expect(await itemStatus(item)).toBe(finalStatus);
   });
 
-  it("SC rule: two simultaneously eligible reservations for one item block BOTH handovers, even submitted concurrently", async () => {
-    const attempts = [reservations.overlap, overlapSecondReservation].map(reservation =>
-      submit(reservation, { studentConfirmed: true, conditions: kitChecklist(items.overlap) }));
-    const results = await Promise.allSettled(attempts);
-    expect(results.every(r => r.status === "rejected" && (r.reason as { status: number }).status === 409)).toBe(true);
-    expect(await admin.query("select 1 from public.loans where item_id = $1", [items.overlap]).then(r => r.rows)).toHaveLength(0);
-    expect(await itemStatus(items.overlap)).toBe("reserved");
-    expect((await admin.query("select count(*)::int as n from public.equipment_status_history where item_id = $1", [items.overlap])).rows[0].n).toBe(0);
-    // Once the overlap is resolved (the other reservation is cancelled), exactly one eligible reservation permits handover.
-    await admin.query("update public.reservations set status = 'cancelled' where id = $1", [overlapSecondReservation]);
-    const result = await submit(reservations.overlap, { studentConfirmed: true, conditions: kitChecklist(items.overlap) });
-    expect(result.status).toBe("checked_out"); expect(await loansFor(reservations.overlap)).toHaveLength(1);
+  /** Resolves "accepted" or rejects with the PostgreSQL error, for constraint assertions. */
+  const attempt = (sql: string, values: unknown[]) => admin.query(sql, values).then(() => "accepted" as const);
+  const S2_02_REJECTION = { code: "23P01", constraint: "reservations_no_overlapping_confirmed" };
+
+  it("S2-02 + SC rule on real PostgreSQL: a second eligible reservation cannot be created; a pending overlap never blocks or gets handed over", async () => {
+    // The multiple-eligible state the SC rule BLOCKs can no longer be created:
+    // neither a new overlapping confirmed row nor confirming the pending one.
+    // (Loans still checks eligibleCount === 1 as defence in depth; that refusal
+    // is covered with modeled data in handover-service.test.ts.)
+    await expect(attempt("insert into public.reservations (item_id, borrower_id, lab_id, start_at, end_at, status) values ($1, $2, $3, now() - interval '30 minutes', now() + interval '1 day', 'confirmed')",
+      [items.overlap, borrowerId, labId])).rejects.toMatchObject(S2_02_REJECTION);
+    await expect(attempt("update public.reservations set status = 'confirmed' where id = $1", [overlapSecondReservation])).rejects.toMatchObject(S2_02_REJECTION);
+    expect(await reservationRow(overlapSecondReservation)).toEqual({ status: "pending", state: null });
+
+    // Concurrent attempts: the pending reservation is refused; the confirmed one
+    // (submitted twice) yields exactly one loan and one checkout.
+    const input = { studentConfirmed: true, conditions: kitChecklist(items.overlap) };
+    const [pending, ...confirmed] = await Promise.allSettled([overlapSecondReservation, reservations.overlap, reservations.overlap].map(r => submit(r, input)));
+    expect(pending).toMatchObject({ status: "rejected", reason: { status: 409, message: "Only confirmed reservations can be handed over." } });
+    expect(confirmed.some(r => r.status === "fulfilled")).toBe(true);
+    expect(await admin.query("select reservation_id from public.loans where item_id = $1", [items.overlap]).then(r => r.rows)).toEqual([{ reservation_id: reservations.overlap }]);
+    expect((await admin.query("select count(*)::int as n from public.equipment_status_history where item_id = $1 and new_status = 'checked_out'", [items.overlap])).rows[0].n).toBe(1);
+    expect(await reservationRow(reservations.overlap)).toEqual({ status: "fulfilled", state: "completed" });
+
+    // OPEN contract item (docs/handover-s2-09.md, C7): S2-02 covers only
+    // status = 'confirmed', so once handover marks a reservation fulfilled, an
+    // overlapping reservation CAN be confirmed. Recorded as observed with LJ's
+    // actual migration; update this expectation if S2-02 is extended to fulfilled.
+    await expect(attempt("update public.reservations set status = 'confirmed' where id = $1", [overlapSecondReservation])).resolves.toBe("accepted");
+    // Handover still cannot hand the item out twice: the active loan blocks it.
+    await expect(submit(overlapSecondReservation, input)).rejects.toMatchObject({ status: 409, message: "This equipment is already on loan." });
+    expect(await loansFor(overlapSecondReservation)).toHaveLength(0);
+    expect(await itemStatus(items.overlap)).toBe("checked_out");
   });
 
-  it.each([
-    ["reservation cancelled by another connection", "finalCancel", "Only confirmed reservations can be handed over."],
-    ["a second eligible reservation committed", "finalOverlap", "More than one reservation is eligible for this equipment right now. Ask staff to resolve the overlap."],
-  ] as const)("final submission re-verifies on committed state: %s after checkout -> 409, Reserved restored, no loan", async (_name, key, message) => {
-    const item = items[key], reservation = reservations[key];
-    hooks.afterApply = async () => {
-      if (key === "finalCancel") await admin.query("update public.reservations set status = 'cancelled' where id = $1", [reservation]);
-      else await admin.query("insert into public.reservations (id, item_id, borrower_id, lab_id, start_at, end_at, status) values ($1, $2, $3, $4, now() - interval '10 minutes', now() + interval '1 day', 'confirmed')", [id("949"), item, borrowerId, labId]);
-    };
-    await expect(submit(reservation, { studentConfirmed: true, conditions: kitChecklist(item) })).rejects.toMatchObject({ status: 409, code: "handover_conflict", message });
+  it("final submission re-verifies on committed state: reservation cancelled by another connection after checkout -> 409, Reserved restored, no loan", async () => {
+    const item = items.finalCancel, reservation = reservations.finalCancel;
+    hooks.afterApply = async () => { await admin.query("update public.reservations set status = 'cancelled' where id = $1", [reservation]); };
+    await expect(submit(reservation, { studentConfirmed: true, conditions: kitChecklist(item) })).rejects.toMatchObject({ status: 409, code: "handover_conflict", message: "Only confirmed reservations can be handed over." });
     expect(await itemStatus(item)).toBe("reserved");
     expect(await loansFor(reservation)).toHaveLength(0);
     expect((await admin.query("select count(*)::int as n from public.condition_records where item_id = $1", [item])).rows[0].n).toBe(0);
@@ -343,6 +361,24 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     expect(history.rows.map(r => r.new_status)).toEqual(["checked_out", "reserved"]);
     expect(history.rows[1].request_key).toMatch(/:0:undo$/);
     expect((await admin.query("select handover_operation ->> 'state' as state from public.reservations where id = $1", [reservation])).rows[0].state).toBe("compensated");
+  });
+
+  it("race: another connection's overlapping confirmed reservation during handover is refused by S2-02; the handover completes", async () => {
+    const item = items.finalOverlap, reservation = reservations.finalOverlap;
+    let raced: unknown = "not attempted";
+    // Between checkout and the final loan transaction (the window the final
+    // re-verification protects), another writer tries to commit an overlapping booking.
+    hooks.afterApply = async () => {
+      raced = await attempt("insert into public.reservations (id, item_id, borrower_id, lab_id, start_at, end_at, status) values ($1, $2, $3, $4, now() - interval '10 minutes', now() + interval '1 day', 'confirmed')",
+        [id("949"), item, borrowerId, labId]).catch((error: unknown) => error);
+    };
+    const result = await submit(reservation, { studentConfirmed: true, conditions: kitChecklist(item) });
+    expect(raced).toMatchObject(S2_02_REJECTION);
+    expect((await admin.query("select 1 from public.reservations where id = $1", [id("949")])).rows).toHaveLength(0);
+    expect(result.status).toBe("checked_out");
+    expect(await loansFor(reservation)).toHaveLength(1);
+    expect(await reservationRow(reservation)).toEqual({ status: "fulfilled", state: "completed" });
+    expect((await admin.query<{ new_status: string }>("select new_status from public.equipment_status_history where item_id = $1 order by id", [item])).rows.map(r => r.new_status)).toEqual(["checked_out"]);
   });
 
   it("identity: an inactive borrower profile (via the restricted Users role) blocks handover before any Equipment change", async () => {

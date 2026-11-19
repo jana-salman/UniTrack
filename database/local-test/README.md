@@ -41,7 +41,7 @@ loopback database created by this harness.
 Expected final output:
 
 ```text
-PASS: migrations 003-006 and the focused microservice integration checks passed locally.
+PASS: migrations 003-006, S2-02 and C430PRJCT-40, plus the focused microservice integration checks, passed locally.
 ```
 
 The focused tests cover migrated column definitions, both unique partial
@@ -52,8 +52,11 @@ and Equipment transaction function against real PostgreSQL. Migration 006 also
 checks password-free group roles, least-privilege grants, RLS policies, owned
 table operations, sequence access, and denied cross-service table reads.
 
-After 006 the runner applies the C430PRJCT-40 (S2-09 handover) migration twice
-to prove it is idempotent, runs `verify_C430PRJCT-40.sql`, and runs
+After 006 the runner applies LJ's S2-02 migration (`S2-02_no_double_booking.sql`,
+the exclusion constraint `reservations_no_overlapping_confirmed`) and runs
+`verify_S2-02.sql`. It then applies the C430PRJCT-40 (S2-09 handover) migration
+twice to prove it is idempotent, runs `verify_C430PRJCT-40.sql`, re-runs
+`verify_S2-02.sql` (the handover migration must leave the constraint intact), and runs
 `services/loans/tests/postgres-handover.integration.test.ts` with Loans and
 Equipment connected as their restricted 006 group roles. That test creates its
 own synthetic lab, kits, components and reservations.

@@ -1,5 +1,5 @@
 # Manual S2-09 handover testing on a DISPOSABLE local PostgreSQL (never Supabase).
-#   -Action Setup     start container, apply 003-006 + C430PRJCT-40, apply the
+#   -Action Setup     start container, apply 003-006 + S2-02 + C430PRJCT-40, apply the
 #                     SYNTHETIC S2-01 status grant (stand-in, not LJ's
 #                     migration), create restricted service logins, load the
 #                     synthetic fixture
@@ -43,7 +43,7 @@ switch ($Action) {
     foreach ($migration in @(
         '003_equipment_request_fingerprint', '004_loans_return_operation',
         '005_equipment_operation_guard', '006_service_database_isolation',
-        'C430PRJCT-40_S2-09_handover_confirmation')) {
+        'S2-02_no_double_booking', 'C430PRJCT-40_S2-09_handover_confirmation')) {
       Invoke-Psql @('--quiet', '--file', "/workspace/database/migrations/$migration.sql") "Migration $migration"
     }
     # SYNTHETIC stand-in for LJ's S2-01 UPDATE (status) grant (handover marks the
