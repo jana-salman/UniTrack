@@ -1,8 +1,8 @@
 # Handover — S2-09 / C430PRJCT-40 (NH)
 
 Kit checklist, condition and student confirmation. A lab assistant opens
-`/handover/[reservationId]`, ticks every row, records a condition (with optional
-notes), checks the student's university ID card in person and ticks the ID check,
+`/handover/[reservationId]`, ticks every row, records a condition (a note is
+required for Missing component and Existing damage, optional otherwise), checks the student's university ID card in person and ticks the ID check,
 and the student ticks the confirmation box on the same screen. The handover is
 complete only after both ticks, a Users check that the borrower is an active
 student of the lab, and a successful Equipment checkout; it then saves the loan,
@@ -60,6 +60,7 @@ transaction (final PO decisions of 2026-11-19, see "Reservation fulfilment").
 | Equipment status must be `reserved` or `available` (**PO decision A2**) | Loans (read from Equipment over HTTP); Equipment re-checks it under its row lock at checkout |
 | Missing items must be included in the student's confirmation (**PO decision A1**) | Page lists them in the confirmation box and clears confirmation on any edit; Loans requires `acknowledgedMissing` to match the missing rows |
 | Checklist = one **main-item** row (`kitComponentId: null`, the kit itself or the non-kit item, with its own explicit condition) **plus**, for kits, every **active** component exactly once (actual IDs); every row ticked; valid condition; notes ≤ 1000 chars | Loans, against Equipment's component list |
+| **Note required** for every row recorded Missing component (`missing`) or Existing damage (`damaged`): omitted, `null`, empty and whitespace-only notes are refused; Good and Needs attention keep notes optional (PR #24 review correction) | One shared rule in contracts (`hasRequiredHandoverNote`). Page: label switches to "Notes (required)", a hint shows until text is entered, and the form refuses to send. Loans: 400 `invalid_handover` "Add a note to every row marked Missing component or Existing damage." before any database, Users or Equipment access. Every **stored plan** is checked too (`validOperation`), so replay, Finish interrupted handover, recovery by another assistant and re-planning after an undo cannot save such a row; a stored plan that fails it is `handover_state_uncertain` for staff, never finished. |
 | Confirmed reservation dates unchanged during the handover | Loans final transaction compares `start_at`/`end_at` with the plan; a difference is 409 "reservation changed" (guarded undo, no loan) |
 | Checklist must match what was shown: the page sends `checklistVersion` (SHA-256 of the canonical component list from Equipment) | Loans recomputes it from Equipment before checkout **and again after checkout**; a mismatch is 409 "component list changed" (after checkout: guarded undo, no records) |
 | Borrower is an **active student of the reservation's lab** whose id is the reservation's `borrower_id`, verified through **Users** (`GET /profiles/:id/borrower`) | Loans before checkout and again after checkout. Not found / not a student / other lab / inactive → 409 `borrower_unverified` (after checkout: guarded undo). Users unreachable → 503 `borrower_unavailable` before checkout (nothing changed) or `handover_incomplete` after checkout (durable plan kept for recovery). The page shows the checklist only when Users reports the borrower verified; a displayed name never counts. |
@@ -67,7 +68,9 @@ transaction (final PO decisions of 2026-11-19, see "Reservation fulfilment").
 Condition labels → stored values: Good → `good`, Existing damage → `damaged`,
 Missing component → `missing`, Needs attention → `unknown`. "Ticked" means
 *checked by the assistant*, not *present*: a missing charger is ticked and marked
-Missing with its note. No photo is required for existing damage.
+Missing with its note. Missing component and Existing damage always need a
+note that says what is missing or damaged. No photo is required for existing
+damage.
 
 On success Loans creates exactly one loan (`due_date` = reservation `end_at`,
 `student_confirmed_at` = accepted time), one `phase = 'pickup'` condition
@@ -163,11 +166,15 @@ so any legitimate later change (repair, a different handover, even
 `checked_out → under_maintenance → checked_out`) makes the undo fail as
 `handover_state_uncertain`; nothing is overwritten and the plan stays
 `compensating` for staff. Concurrent attempts on the same reservation are
-serialized by the advisory lock; overlapping reservations for one item race on
+serialized by the advisory lock. Two overlapping **confirmed** reservations for
+one item can no longer exist (LJ's S2-02 exclusion constraint, merged in PR #26);
+any remaining race between handovers of one item still meets the per-item lock,
 Equipment's `expectedStatus` check and `loans_one_active_per_item`, so exactly
 one wins and the loser never applied anything to undo. Real-PostgreSQL tests
-cover both later-change cases and the overlapping-reservation race. Relies on
-migration 005 being applied (owner-reported on shared Supabase).
+cover both later-change cases, concurrent submissions, and an overlapping
+confirmed insert by another connection during a handover (refused by S2-02; the
+handover completes). Relies on migration 005 being applied (owner-reported on
+shared Supabase).
 
 Dev-mode note: Loans waits 3 s for Equipment (same adapter as Return). The first
 request to an Equipment route under `next dev` can take longer while it
@@ -228,7 +235,24 @@ exercised on a local database that had the earlier version applied and a real
 handover loan: the loan kept its values (ID-check columns NULL, nothing
 backfilled) and a second run was a no-op.
 
-**Full `run.ps1` passed on 2026-11-19 after the fulfilment changes** (fresh container): preflight gates PASS; 003, 004, 005, 006 and this migration (applied twice) verified; static migration compatibility 5/5; existing Equipment/Loans (Return) PostgreSQL suite 3/3; handover PostgreSQL suite 26/26 as restricted roles, **with the SYNTHETIC S2-01 status grant** (not LJ's migration). (Previous full pass: 2026-11-18, 21/21, before fulfilment.)
+**Full `run.ps1` passed on 2026-11-19 after merging `main` (PR #26, S2-02) and the review corrections** (fresh container, the ACTUAL merged migration files): preflight gates PASS; 003, 004, 005, 006 verified; **LJ's real `S2-02_no_double_booking.sql`** applied and `verify_S2-02.sql` PASS; this migration applied twice and `verify_C430PRJCT-40.sql` PASS; `verify_S2-02.sql` re-run PASS (constraint untouched); static migration compatibility 6/6; Equipment/Loans PostgreSQL suite (including LJ's S2-02 test) 4/4; handover PostgreSQL suite 26/26 as restricted roles.
+
+What that run does and does not prove:
+
+- **Real integration evidence:** S2-02's exclusion constraint (LJ's actual
+  migration) together with this migration and the handover service on real
+  PostgreSQL: overlapping confirmed inserts and promotions are refused with
+  23P01, including one committed by another connection mid-handover; the
+  handover completes and is fulfilled once.
+- **Still SYNTHETIC:** marking the reservation `fulfilled` uses
+  `SYNTHETIC_s2-01_reservation_status_grant.sql`, because no S2-01 migration
+  with `GRANT UPDATE (status)` exists on `main` or any remote branch (checked
+  2026-11-19). Every fulfilment result in this suite therefore depends on that
+  stand-in, and the cancel/lock checks use the reference `cancelUnderContract`
+  sketch, **not** LJ's code. The permission/locking dependency is **not
+  resolved**.
+
+(Earlier passes: 2026-11-19 before the merge, 26/26 with S2-09 only; 2026-11-18, 21/21, before fulfilment.)
 
 Shared Supabase was not touched. Verified on disposable PostgreSQL via
 `database/local-test/run.ps1` (applies it twice, runs
@@ -364,6 +388,12 @@ timeout, age or session end releases it.
   (Return does not change the reservation), and it does not cover a loan that
   runs past `end_at`. Alternatives (e.g. relying on handover's active-loan check
   only, or ending the fulfilled window at return) are for LJ/JS to weigh.
+  **Observed with LJ's merged S2-02 (real PostgreSQL, 2026-11-19):** after a
+  handover marks a reservation `fulfilled`, an overlapping reservation for the
+  same item CAN be confirmed (the constraint no longer sees the fulfilled row);
+  handing it over is still refused ("This equipment is already on loan.") while
+  the loan is active. The test asserts the current behaviour so it fails loudly
+  if S2-02 is extended; C7 itself remains a proposal.
 
 Why both commit orders are safe for a confirmed reservation: handover T2 and a
 C1–C3 cancel serialize on L2 (and L3). If the cancel commits first, T2 sees `cancelled` and refuses
@@ -471,6 +501,20 @@ needs explicit verification in S2-01's own script plus restricted-role tests.
   **proposed** contract only, not LJ's implementation.
 - **Web:** `reservation_fulfillment_unavailable` shown as a definite failure; a
   completed handover on a `fulfilled` reservation renders as completed.
+- **Note requirement (review correction):** Loans unit tests refuse
+  missing/damaged × kit component/main item × omitted/`null`/empty/spaces/
+  tabs-and-newlines (20 cases) with 400 before any database, Users or Equipment
+  access; one blank note among valid problem rows refuses the whole handover;
+  Good/Needs attention stay optional. Stored-plan tests blank the note inside a
+  `planned`, `applied` and `compensated` plan: recovery by the starter, recovery
+  by another assistant, exact resubmission and re-planning all end
+  `handover_state_uncertain` with no records and no new Equipment call. Gateway
+  tests (form bypassed) get the same 400 and approved message with no Users or
+  Equipment request. UI tests: required label/hint/`aria-required` only for the
+  two conditions; blank and whitespace-only notes are not sent even when both
+  boxes are ticked; adding the note clears the confirmation, and after
+  reconfirming the note is saved. Each layer was checked by temporarily
+  removing it: the corresponding tests failed.
 
 ### Pickup lookup (no duplicate)
 
@@ -484,17 +528,32 @@ assistant, own lab; `services/loans/lib/reservations/pickup-query.ts`) behind We
 re-enabling the link is SC's change after this PR merges. The pickup lookup is a
 point-in-time read; the handover service re-checks everything on locked rows.
 
-### S2-02 (LJ, unmerged) — fixture adaptation still needed after it merges
+### S2-02 (LJ) — merged in PR #26; fixtures adapted
 
-LJ's `feature/S2-02-no-double-booking` (`d90cf11`, unchanged on 2026-11-19, not
-applied to shared Supabase) adds `reservations_no_overlapping_confirmed EXCLUDE
-USING gist (item_id WITH =, tstzrange(start_at, end_at, '[)') WITH &&) WHERE
-(status = 'confirmed')`. After it merges: resolve the one-line
-`database/local-test/run.ps1` conflict (both add steps after 006), and replace
-this card's PostgreSQL fixtures that insert overlapping `confirmed` rows (the
-two-eligible-reservations test and the `finalOverlap` case) with an assertion
-that the database rejects the overlap during a handover; the multiple-eligible
-rule stays covered by the unit tests. See C7 for `fulfilled`.
+`main` now contains LJ's `S2-02_no_double_booking.sql` (`d90cf11`, merged as
+`9825f6d`): `reservations_no_overlapping_confirmed EXCLUDE USING gist (item_id
+WITH =, tstzrange(start_at, end_at, '[)') WITH &&) WHERE (status =
+'confirmed')`. This branch merged `origin/main` and:
+
+- `database/local-test/run.ps1` keeps both sequences: S2-02 + `verify_S2-02.sql`
+  (production order: it is already on `main`), then this migration twice +
+  `verify_C430PRJCT-40.sql`, then `verify_S2-02.sql` again.
+  `handover-manual.ps1` also applies S2-02 so browser checks use the merged
+  schema.
+- The PostgreSQL fixtures no longer insert a second overlapping `confirmed`
+  reservation (the constraint correctly rejects it; it is not disabled).
+  Instead: the overlap reservation is seeded `pending`; the test asserts that
+  both inserting and promoting an overlapping confirmed reservation fail with
+  23P01 on `reservations_no_overlapping_confirmed`, that the pending one is
+  refused for handover, and that concurrent submissions create one loan. The
+  former `finalOverlap` case now has another connection try to commit an
+  overlapping confirmed reservation between checkout and the final
+  transaction: S2-02 refuses it and the handover completes.
+- The SC "several eligible → BLOCK" rule cannot be reached on a database with
+  S2-02 (two confirmed windows that both contain `now` always overlap). Loans
+  keeps it as defence in depth; it stays covered by the modelled-database unit
+  tests (plan time and final transaction).
+- See C7 for `fulfilled` (observed behaviour recorded there).
 
 ### Other remaining limits (unchanged)
 
@@ -515,12 +574,14 @@ rule stays covered by the unit tests. See C7 for `fulfilled`.
   closed with 503 `loans_configuration`.
 
 - `packages/contracts`: new `handover.ts`; `LOANS_ERROR_CONTRACT` gains handover
-  messages/codes (existing entries unchanged).
+  messages/codes (existing entries unchanged), including "Add a note to every row
+  marked Missing component or Existing damage." (code `invalid_handover`).
 - `services/loans/lib/equipment-http.ts`: private request helper hoisted to module
   level so a handover adapter can reuse it; return adapter behaviour, messages
   and `getComponents` are unchanged.
 - `services/loans/lib/errors.ts`: adds `handoverUncertain()`.
-- `database/local-test/run.ps1`: two additive steps for this migration and test.
+- `database/local-test/run.ps1`: additive steps for this migration and test,
+  merged with S2-02's steps (see "S2-02"); `handover-manual.ps1` applies S2-02.
 - `database/local-test/SYNTHETIC_s2-01_reservation_status_grant.sql`: test-only
   stand-in for LJ's status grant (used by the handover PostgreSQL test and the
   manual harness; never a migration).
@@ -532,7 +593,7 @@ rule stays covered by the unit tests. See C7 for `fulfilled`.
 
 `database/local-test/handover-manual.ps1 -Action Setup -AssistantId <your
 Supabase user ID> -AssistantEmail <your email>` starts a local container, applies
-003-006 and this migration, creates `unitrack_{users,equipment,loans}_local`
+003-006, S2-02 and this migration, creates `unitrack_{users,equipment,loans}_local`
 LOGIN accounts that only inherit their 006 group roles
 (`manual_service_logins.sql`), and loads `handover_manual_fixture.sql`. Then run
 `-Action Run -Service users|equipment|loans` in three terminals. Setup also
@@ -574,6 +635,27 @@ confirmation reset after editing a row, page reload / retry of a completed
 handover, the uncertain-outcome and "Finish interrupted handover" screens, and
 Return of these loans.
 
+### Focused browser re-checks needed after the note validation (NOT yet run)
+
+The run above **predates** the required-note rule and the merge of S2-02, so it
+does not show the new behaviour. Re-running every scenario is unnecessary: the
+TC-3.1 path (all Good, no notes), identity, the ID check and fulfilment are
+unchanged and covered by the automated suites. Only these checks, on a fresh
+`handover-manual.ps1 -Action Setup` (now including S2-02, still with the
+SYNTHETIC grant):
+
+| # | Reservation | Steps | Expected |
+|---|---|---|---|
+| B1 | `…9922` (kit) | Tick all rows; Charger → Missing component, note left empty; tick ID check and student confirmation; Complete handover | Label reads "Notes (required)" with "Describe what is missing."; red error "Add a note to every row marked Missing component or Existing damage."; nothing sent; item still Reserved, 0 loans |
+| B2 | `…9922` | Type only spaces in the Charger note; Complete handover | Same refusal (whitespace is not a note) |
+| B3 | `…9922` | Enter "Charger not in the case" | Student confirmation is cleared ("must confirm again"); after reconfirming, Borrowed; Charger `missing` with that note; reservation `fulfilled` |
+| B4 | `…9923` (non-kit) | Main item → Existing damage, note empty, both boxes ticked → refused; then enter a note, reconfirm, complete | Refused first with the same message; then Borrowed, one `damaged` pickup row with the note |
+| B5 | `…9924` (kit, optional) | One row → Needs attention with no note; complete | Accepted (notes stay optional for Needs attention and Good) |
+
+Record only what is actually seen; database checks read-only, as before. The
+scan page's "Proceed to Handover" link is still disabled on `main` (SC), so
+open `/handover/<reservation id>` directly.
+
 **Observed limitation (pre-existing, minor):** each loan's `due_date` equals
 the reservation's `end_at` truncated to the millisecond (here 257 µs earlier),
 because Loans passes `end_at` through a JavaScript date. Fixture times come from
@@ -601,15 +683,19 @@ Shared Supabase was not used; no shared migration was applied.
 - **Dependency (LJ, S2-01 migration):** `GRANT UPDATE (status) ON
   public.reservations TO unitrack_loans_service`. Without it no handover can
   complete (503 `reservation_fulfillment_unavailable`, nothing changed).
-- **Pending combined testing:** S2-09 with LJ's real migration and S2-01
-  endpoints on a disposable database (cancel vs. handover in both commit orders,
-  every state in the table, fulfilled terminal, immutable dates), and the S2-02
-  fixture adaptation. Until then this card's results cover only the synthetic
-  stand-in and the reference sketch.
+- **Combined testing — partly done.** Done: S2-09 with LJ's merged S2-02
+  migration on a fresh disposable database (fixtures adapted; see "S2-02").
+  Still pending, because LJ's S2-01 status grant and reservation-write
+  endpoints do not exist yet: S2-09 with that real grant and code (cancel vs.
+  handover in both commit orders, every state in the table, fulfilled
+  terminal, immutable dates, the common item lock). Until then fulfilment and
+  locking results cover only the synthetic stand-in and the reference sketch,
+  and the dependency stays **open**.
 - **Browser acceptance (NH, 2026-11-19): done** for TC-3.1, 3.4, 3.5 and the
   TC-3.7 refusals on a disposable database with the synthetic grant (see the
-  results table). Confirmation reset on edit and reload/retry were not checked
-  in the browser.
+  results table), **before** the note rule. Focused re-checks B1–B5 for the
+  note rule are **pending** (see "Focused browser re-checks"). Confirmation
+  reset on edit and reload/retry were not checked in the browser.
 - **Equipment owner (component versioning):** the post-checkout component check
   narrows but cannot remove the window before the loan COMMIT (no distributed
   transaction). Equipment has no API that edits kit components today. If one is
