@@ -30,15 +30,25 @@ describe("roles and navigation", () => {
       is_active: true,
     };
 
-    const markup = renderToStaticMarkup(<AppNavigation profile={profile} />);
+    const markup = renderToStaticMarkup(
+      <AppNavigation profile={profile} />
+    );
 
     expect(markup).toContain('href="/dashboard"');
     expect(markup).toContain(roleLabel(role));
+
     expect(markup.includes('href="/manager/users"')).toBe(
-      role === "lab_manager",
+      role === "lab_manager"
     );
+
     expect(markup.includes('href="/equipment/lookup"')).toBe(
-    role === "lab_assistant" || role === "lab_manager",
+      role === "lab_assistant" ||
+      role === "lab_manager" ||
+      role === "professor"
+    );
+
+    expect(markup.includes('href="/scan"')).toBe(
+      role !== "student"
     );
   });
 });

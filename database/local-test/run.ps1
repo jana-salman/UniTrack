@@ -57,10 +57,16 @@ try {
   Invoke-PsqlFile '/workspace/database/migrations/006_service_database_isolation.sql' 'Migration 006'
   Invoke-PsqlFile '/workspace/database/local-test/verify_006.sql' 'Migration 006 verification'
 
+  Write-Host 'Applying and verifying migration S2-02 locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/S2-02_no_double_booking.sql' 'Migration S2-02'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_S2-02.sql' 'Migration S2-02 verification'
+
   Write-Host 'Applying (twice, to prove idempotency) and verifying C430PRJCT-40 handover migration locally...'
   Invoke-PsqlFile '/workspace/database/migrations/C430PRJCT-40_S2-09_handover_confirmation.sql' 'Migration C430PRJCT-40'
   Invoke-PsqlFile '/workspace/database/migrations/C430PRJCT-40_S2-09_handover_confirmation.sql' 'Migration C430PRJCT-40 re-run'
   Invoke-PsqlFile '/workspace/database/local-test/verify_C430PRJCT-40.sql' 'Migration C430PRJCT-40 verification'
+  Write-Host 'Re-verifying S2-02 after the handover migration (constraint must be untouched)...'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_S2-02.sql' 'Migration S2-02 re-verification'
 
   Push-Location $repositoryRoot
   try {
@@ -92,7 +98,7 @@ try {
     Pop-Location
   }
 
-  Write-Host 'PASS: migrations 003-006, C430PRJCT-40 and the focused microservice integration checks passed locally.'
+  Write-Host 'PASS: migrations 003-006, S2-02 and C430PRJCT-40, plus the focused microservice integration checks, passed locally.'
 }
 finally {
   if ($containerStarted) {

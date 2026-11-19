@@ -57,3 +57,24 @@ it("keeps service isolation password-free and scoped to explicit UniTrack object
  expect(executable).toMatch(/GRANT SELECT, UPDATE ON public\.loans TO unitrack_loans_service/i);
  expect(executable).toMatch(/GRANT SELECT, INSERT ON public\.equipment_status_history TO unitrack_equipment_service/i);
 });
+
+it("prevents overlapping confirmed reservations with an additive exclusion constraint", () => {
+  const sql = readFileSync(
+    new URL("S2-02_no_double_booking.sql", migrations),
+    "utf8",
+  ).replace(/--[^\n]*/g, "");
+
+  expect(sql).toMatch(/BEGIN\s*;/i);
+  expect(sql).toMatch(/CREATE EXTENSION IF NOT EXISTS btree_gist/i);
+  expect(sql).toMatch(
+    /ADD CONSTRAINT reservations_no_overlapping_confirmed\s+EXCLUDE USING gist/i,
+  );
+  expect(sql).toContain("item_id WITH =");
+  expect(sql).toContain("tstzrange(start_at, end_at, '[)')");
+  expect(sql).toMatch(/WHERE\s*\(\s*status\s*=\s*'confirmed'\s*\)/i);
+  expect(sql).toMatch(/COMMIT\s*;/i);
+
+  expect(sql).not.toMatch(
+    /\b(?:UPDATE|DELETE|TRUNCATE|DROP)\b|DISABLE\s+TRIGGER/i,
+  );
+});

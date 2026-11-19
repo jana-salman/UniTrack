@@ -8,7 +8,9 @@ export function AppNavigation({ profile }: { profile: Profile }) {
   const canScan = profile.role !== "student";
   const isManager = profile.role === "lab_manager";
   const canLookupEquipment =
-    profile.role === "lab_assistant" || isManager;
+     profile.role === "lab_assistant" ||
+     profile.role === "professor" ||
+     isManager;
 
   const navigation: NavLink[] = [
     { href: "/dashboard", label: "Dashboard" },
