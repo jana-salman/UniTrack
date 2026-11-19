@@ -555,6 +555,73 @@ describe("PO decision A1 (ZZ): missing components must be disclosed in the stude
   });
 });
 
+describe("review correction: Missing component and Existing damage require a nonblank note", () => {
+  const NOTE_REQUIRED = "Add a note to every row marked Missing component or Existing damage.";
+  type NoteVariant = [string, (row: Record<string, unknown>) => Record<string, unknown>];
+  const blankNotes: NoteVariant[] = [
+    ["omitted", row => { const copy = { ...row }; delete copy.notes; return copy; }],
+    ["null", row => ({ ...row, notes: null })],
+    ["empty", row => ({ ...row, notes: "" })],
+    ["spaces only", row => ({ ...row, notes: "    " })],
+    ["tabs and newlines only", row => ({ ...row, notes: "\t\n \r\n" })],
+  ];
+  const cases = (["missing", "damaged"] as const).flatMap(condition =>
+    ([["a kit component", chargerId], ["the main item", null]] as const).flatMap(([target, id]) =>
+      blankNotes.map(([variant, apply]) => [condition, target, variant, id, apply] as const)));
+  it.each(cases)("refuses %s on %s with a note that is %s, before any database or Equipment access", async (condition, _target, _variant, id, apply) => {
+    const conditions = goodChecklist().map(row => (row.kitComponentId === id ? apply({ ...row, conditionStatus: condition }) : row));
+    // Acknowledged, ID-checked and confirmed: the ONLY defect is the blank note.
+    const value = { ...body(conditions), acknowledgedMissing: condition === "missing" ? [id] : [] };
+    await expect(confirm(value)).rejects.toMatchObject({ status: 400, code: "invalid_handover", message: NOTE_REQUIRED });
+    expect(db.sql).toHaveLength(0); expect(equipment.getItem).not.toHaveBeenCalled(); expect(users.verifyBorrower).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(0); nothingSaved(); expect(status).toBe("reserved");
+  });
+  it("one blank note among several valid problem rows still refuses the whole handover", async () => {
+    const conditions = goodChecklist().map(row =>
+      row.kitComponentId === chargerId ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" }
+        : row.kitComponentId === kitComponents[3].id ? { ...row, conditionStatus: "damaged", notes: " " } : row);
+    await expect(confirm({ ...body(conditions), acknowledgedMissing: [chargerId] })).rejects.toMatchObject({ status: 400, message: NOTE_REQUIRED });
+    expect(db.sql).toHaveLength(0); nothingSaved();
+  });
+  it.each(["good", "unknown"])("keeps the note optional for %s (blank notes are saved as null)", async condition => {
+    await confirm(body(goodChecklist().map(row => (row.kitComponentId === null ? { ...row, conditionStatus: condition, notes: "   " } : row))));
+    expect(mainRow()).toMatchObject({ condition_status: condition, notes: null });
+  });
+
+  // Recovery reuses the STORED plan without form data. A plan whose Missing /
+  // Damaged row lost its note (tampering, a bug, or a pre-correction plan) must
+  // never be finished into condition_records.
+  const blankStoredNote = () => {
+    const op = db.state.reservation.handover_operation as { conditions: { kitComponentId: string | null; notes: string }[] };
+    op.conditions.find(row => row.kitComponentId === chargerId)!.notes = "  ";
+  };
+  const missingAck = () => ({ ...body(goodChecklist().map(row => (row.kitComponentId === chargerId ? { ...row, conditionStatus: "missing", notes: "Charger not in the case" } : row))), acknowledgedMissing: [chargerId] });
+  it("planned plan (lost checkout response): Finish interrupted handover refuses the stored blank note", async () => {
+    loss = true; await expect(confirm(missingAck())).rejects.toMatchObject({ code: "handover_state_uncertain" });
+    expect(opState()).toBe("planned"); blankStoredNote();
+    await expect(recover()).rejects.toMatchObject({ code: "handover_state_uncertain" });
+    nothingSaved(); expect(calls).toHaveLength(1); expect(opState()).toBe("planned");
+  });
+  it("applied plan: neither the starter nor another assistant can finish it, and an exact resubmission cannot either", async () => {
+    users.verifyBorrower.mockResolvedValueOnce(verified).mockRejectedValueOnce(borrowerUnavailable());
+    await expect(confirm(missingAck())).rejects.toMatchObject({ code: "handover_incomplete" });
+    expect(opState()).toBe("applied"); blankStoredNote();
+    await expect(recover()).rejects.toMatchObject({ code: "handover_state_uncertain" });
+    await expect(recoverHandover(reservationId, otherAssistant, ports)).rejects.toMatchObject({ code: "handover_state_uncertain" });
+    await expect(confirm(missingAck())).rejects.toMatchObject({ code: "handover_state_uncertain" });
+    nothingSaved(); expect(calls).toHaveLength(1); expect(opState()).toBe("applied");
+  });
+  it("compensated plan: a resubmission cannot re-plan from the stored blank note", async () => {
+    users.verifyBorrower.mockResolvedValueOnce(verified).mockRejectedValueOnce(borrowerUnavailable());
+    await expect(confirm(missingAck())).rejects.toMatchObject({ code: "handover_incomplete" });
+    db.settings.recordFailure = true; await expect(recover()).rejects.toMatchObject({ code: "handover_rolled_back" }); db.settings.recordFailure = false;
+    expect(opState()).toBe("compensated"); blankStoredNote();
+    const before = calls.length;
+    await expect(confirm(missingAck())).rejects.toMatchObject({ code: "handover_state_uncertain" });
+    nothingSaved(); expect(calls).toHaveLength(before); expect(status).toBe("reserved");
+  });
+});
+
 describe("PO decision A2 (ZZ): eligible reservations may be handed over while Available, without duplicate checkout", () => {
   beforeEach(() => { status = "available"; });
   it("hands over Available equipment with expectedStatus [available] and one keyed checkout", async () => {

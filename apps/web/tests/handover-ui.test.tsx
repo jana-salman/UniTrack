@@ -257,10 +257,11 @@ it("A1: existing damage and Needs attention are also shown to the student before
 });
 
 it.each([
-  ["a condition", async (all: HTMLElement[]) => setValue(all[2].querySelector("select")!, "missing")],
-  ["a note", async (all: HTMLElement[]) => setValue(all[0].querySelector("textarea")!, "added after confirmation")],
-  ["a tick", async (all: HTMLElement[]) => click(all[3].querySelector<HTMLInputElement>('input[type="checkbox"]')!)],
-])("changing %s after confirmation clears it, blocks submission, and requires confirmation again", async (_name, change) => {
+  // Needs attention keeps notes optional, so ONLY the cleared confirmation blocks here.
+  ["a condition", async (all: HTMLElement[]) => setValue(all[2].querySelector("select")!, "unknown"), "The student must confirm the handover before it can be completed."],
+  ["a note", async (all: HTMLElement[]) => setValue(all[0].querySelector("textarea")!, "added after confirmation"), "The student must confirm the handover before it can be completed."],
+  ["a tick", async (all: HTMLElement[]) => click(all[3].querySelector<HTMLInputElement>('input[type="checkbox"]')!), "Tick every row after checking it."],
+])("changing %s after confirmation clears it, blocks submission, and requires confirmation again", async (_name, change, alert) => {
   await open();
   const all = rows();
   for (const row of all) await fillRow(row);
@@ -270,8 +271,48 @@ it.each([
   expect(studentBox().checked).toBe(false);
   expect(host.textContent).toContain("The checklist changed after the student confirmed. The student must confirm again.");
   await submit();
-  await waitForUi(() => expect(host.querySelector('[role="alert"]')?.textContent).toBeTruthy());
+  await waitForUi(() => expect(host.querySelector('[role="alert"]')?.textContent).toBe(alert));
   expect(loanPosts()).toHaveLength(0); expect(fixture.db.state.loans).toHaveLength(0);
+});
+
+const NOTE_REQUIRED = "Add a note to every row marked Missing component or Existing damage.";
+const noteLabel = (row: HTMLElement) => row.querySelector(`label[for^="notes-"]`)?.textContent;
+
+it("review correction: the note becomes required for Missing component and Existing damage only", async () => {
+  await open();
+  const row = rows()[1];
+  expect(noteLabel(row)).toBe("Notes (optional)");
+  for (const [condition, required] of [["missing", true], ["damaged", true], ["unknown", false], ["good", false]] as const) {
+    await setValue(row.querySelector("select")!, condition);
+    expect(noteLabel(row)).toBe(required ? "Notes (required)" : "Notes (optional)");
+    expect(row.querySelector("textarea")!.getAttribute("aria-required")).toBe(String(required));
+    expect(row.querySelector('[data-testid="note-required"]') !== null).toBe(required);
+  }
+  await setValue(row.querySelector("select")!, "missing");
+  await setValue(row.querySelector("textarea")!, "   ");
+  expect(row.querySelector('[data-testid="note-required"]')?.textContent).toBe("Describe what is missing.");
+  await setValue(row.querySelector("textarea")!, "Charger not in the case");
+  expect(row.querySelector('[data-testid="note-required"]')).toBeNull();
+  expect(row.querySelector("textarea")!.getAttribute("aria-invalid")).toBeNull();
+});
+
+it.each([
+  ["missing", ""], ["missing", "   "], ["damaged", ""], ["damaged", "\n\t "],
+])("review correction: %s with a blank note (%j) is not sent even when ticked, ID-checked and confirmed", async (condition, note) => {
+  await open();
+  const all = rows();
+  for (const row of all) await fillRow(row);
+  await setValue(all[1].querySelector("select")!, condition);
+  if (note) await setValue(all[1].querySelector("textarea")!, note);
+  await confirmBoth(); await submit();
+  await waitForUi(() => expect(host.querySelector('[role="alert"]')?.textContent).toBe(NOTE_REQUIRED));
+  expect(loanPosts()).toHaveLength(0); expect(fixture.db.state.loans).toHaveLength(0); expect(fixture.status).toBe("reserved");
+  // Adding the note (which clears the confirmation) and reconfirming then succeeds.
+  await setValue(all[1].querySelector("textarea")!, "Described after the warning");
+  expect(studentBox().checked).toBe(false);
+  await confirmBoth(); await submit();
+  await waitForUi(() => expect(host.textContent).toContain("Handover complete"));
+  expect(fixture.db.state.records.find(r => r.kit_component_id === kitComponents[0].id)).toMatchObject({ condition_status: condition, notes: "Described after the warning" });
 });
 
 it("after reconfirming the changed checklist, the handover saves exactly what was reconfirmed", async () => {

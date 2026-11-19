@@ -26,6 +26,22 @@ export const HANDOVER_NOTES_MAX_LENGTH = 1000;
 export const HANDOVER_MAX_ROWS = 100;
 
 /**
+ * Review correction (PR #24): a row recorded as Missing component or Existing
+ * damage must say what is missing or damaged. Omitted, empty and
+ * whitespace-only notes are rejected by the page AND by Loans (input and every
+ * stored plan). Good and Needs attention keep notes optional.
+ */
+export const HANDOVER_NOTE_REQUIRED_CONDITIONS: readonly ConditionStatus[] = ["missing", "damaged"];
+export const HANDOVER_NOTE_REQUIRED_MESSAGE = "Add a note to every row marked Missing component or Existing damage.";
+export function handoverNoteRequired(status: unknown): boolean {
+  return HANDOVER_NOTE_REQUIRED_CONDITIONS.includes(status as ConditionStatus);
+}
+/** False only when the row's condition needs a note and it has no visible text. */
+export function hasRequiredHandoverNote(row: { conditionStatus: unknown; notes?: unknown }): boolean {
+  return !handoverNoteRequired(row.conditionStatus) || (typeof row.notes === "string" && row.notes.trim().length > 0);
+}
+
+/**
  * kitComponentId is null for the MAIN ITEM (always required: the kit itself or
  * the non-kit item) or an actual kit_components.id for each active component.
  * This is the pickup shape Return compares against (main row + components).
@@ -180,6 +196,7 @@ export function isHandoverOutcome(value: unknown): value is HandoverOutcome {
 export const HANDOVER_ERROR_MESSAGES = [
   "Invalid reservation ID.", "Reservation not found.",
   "Invalid handover information. Check every component.",
+  HANDOVER_NOTE_REQUIRED_MESSAGE,
   "The student must confirm the handover before it can be completed.",
   "Check the student's university ID card in person and tick the ID check before completing the handover.",
   "The borrower must be an active student in this lab, matching the reservation.",

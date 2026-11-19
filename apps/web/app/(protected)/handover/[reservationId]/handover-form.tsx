@@ -4,6 +4,9 @@ import { useState, type FormEvent } from "react";
 import {
   HANDOVER_CONDITION_LABELS,
   HANDOVER_NOTES_MAX_LENGTH,
+  HANDOVER_NOTE_REQUIRED_MESSAGE,
+  handoverNoteRequired,
+  hasRequiredHandoverNote,
   isHandoverOutcome,
   type ConditionStatus,
   type ConfirmHandoverInput,
@@ -57,6 +60,10 @@ export default function HandoverForm({ reservationId, equipmentName, components,
   const missingRows = recorded.filter(row => row.condition === "missing");
   const otherProblems = recorded.filter(row => row.condition === "damaged" || row.condition === "unknown");
 
+  // Missing component / Existing damage rows need a note (Loans enforces it too).
+  const noteRequired = (key: string) => handoverNoteRequired(conditions[key]);
+  const noteMissing = (key: string) => !hasRequiredHandoverNote({ conditionStatus: conditions[key], notes: notes[key] });
+
   /** Any change to the checklist after confirmation clears it (must reconfirm). */
   function edit(apply: () => void) {
     apply();
@@ -107,6 +114,8 @@ export default function HandoverForm({ reservationId, equipmentName, components,
     // Form feedback only; Loans validates everything again on the server.
     if (rows.some(row => !checked[row.key])) return setError("Tick every row after checking it.");
     if (rows.some(row => !CONDITIONS.includes(conditions[row.key] as ConditionStatus))) return setError("Choose a condition for every row.");
+    // Same shared rule Loans enforces: omitted, empty or whitespace-only notes fail.
+    if (rows.some(row => !hasRequiredHandoverNote({ conditionStatus: conditions[row.key], notes: notes[row.key] }))) return setError(HANDOVER_NOTE_REQUIRED_MESSAGE);
     if (!studentConfirmed) return setError("The student must confirm the handover before it can be completed.");
     if (!idVerified) return setError("Check the student's university ID card in person and tick the ID check before completing the handover.");
     await send({
@@ -154,15 +163,25 @@ export default function HandoverForm({ reservationId, equipmentName, components,
               {CONDITIONS.map(value => <option key={value} value={value}>{HANDOVER_CONDITION_LABELS[value]}</option>)}
             </select>
 
-            <label htmlFor={`notes-${row.key}`} className="mt-3 block text-sm font-medium text-slate-700">Notes (optional)</label>
+            <label htmlFor={`notes-${row.key}`} className="mt-3 block text-sm font-medium text-slate-700">
+              {noteRequired(row.key) ? "Notes (required)" : "Notes (optional)"}
+            </label>
             <textarea
               id={`notes-${row.key}`}
               rows={2}
               maxLength={HANDOVER_NOTES_MAX_LENGTH}
               value={notes[row.key] ?? ""}
+              aria-required={noteRequired(row.key)}
+              aria-invalid={noteMissing(row.key) || undefined}
+              aria-describedby={noteMissing(row.key) ? `notes-hint-${row.key}` : undefined}
               onChange={event => { const value = event.target.value; edit(() => setNotes(current => ({ ...current, [row.key]: value }))); }}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-950"
             />
+            {noteMissing(row.key) && (
+              <p id={`notes-hint-${row.key}`} className="mt-1 text-sm text-red-700" data-testid="note-required">
+                Describe what is {conditions[row.key] === "missing" ? "missing" : "damaged"}.
+              </p>
+            )}
           </div>
         ))}
 

@@ -1,7 +1,9 @@
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  HANDOVER_NOTE_REQUIRED_MESSAGE,
   canonicalChecklist,
+  hasRequiredHandoverNote,
   isConditionStatus,
   isHandoverOutcome,
   type ConfirmHandoverInput,
@@ -13,7 +15,7 @@ import { getDatabasePool } from "../db";
 import { LoansError, handoverUncertain } from "../errors";
 import type { BorrowerPort } from "../users-http";
 import type { HandoverEquipmentPort, HandoverKitComponent } from "./equipment-port";
-import { HandoverRuleError, checkFullEligibility, confirmationCoversMissing, validateHandoverChecklist, validateHandoverInput } from "./rules";
+import { HandoverNoteRequiredError, HandoverRuleError, checkFullEligibility, confirmationCoversMissing, validateHandoverChecklist, validateHandoverInput } from "./rules";
 import { fulfilReservationInTransaction, saveHandoverRecordsInTransaction } from "./save-records";
 
 /**
@@ -84,7 +86,11 @@ function validOperation(op: HandoverOperation, reservationId: string): boolean {
     && Number.isFinite(Date.parse(op.window.startAt)) && op.window.endAt === op.result.dueDate
     && Array.isArray(op.conditions) && op.conditions.length > 0 && op.conditions.every(row => !!row
       && (row.kitComponentId === null || typeof row.kitComponentId === "string")
-      && row.checked === true && isConditionStatus(row.conditionStatus) && typeof row.notes === "string");
+      && row.checked === true && isConditionStatus(row.conditionStatus) && typeof row.notes === "string"
+      // Every stored plan (replay, Finish interrupted handover, re-plan after an
+      // undo) is checked too, so a Missing/Damaged row without a note can never
+      // reach condition_records through recovery. Such a plan is not trusted.
+      && hasRequiredHandoverNote(row));
 }
 
 // The shared Equipment adapter words its errors for returns; keep the handover
@@ -145,7 +151,12 @@ async function runHandover(reservationId: string, actor: UserIdentity, ports: Ha
   let fingerprint: string | null = null;
   if (mode.kind === "submit") {
     try { input = validateHandoverInput(mode.raw); }
-    catch { throw new LoansError(400, "invalid_handover", "Invalid handover information. Check every component."); }
+    catch (error) {
+      // Review correction: a Missing component / Existing damage row needs a note.
+      // Refused here, before any database or Equipment access.
+      if (error instanceof HandoverNoteRequiredError) throw new LoansError(400, "invalid_handover", HANDOVER_NOTE_REQUIRED_MESSAGE);
+      throw new LoansError(400, "invalid_handover", "Invalid handover information. Check every component.");
+    }
     // TC-3.7: without explicit student confirmation nothing is read or written.
     if (!input.studentConfirmed) throw new LoansError(400, "student_confirmation_required", "The student must confirm the handover before it can be completed.");
     // PO decision (JS): the assistant physically checks the student's university

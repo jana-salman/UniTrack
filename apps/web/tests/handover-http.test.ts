@@ -272,3 +272,21 @@ describe("PO decision A1 through the gateway", () => {
     expect(fixture.requests.filter(r => r.service === "equipment")).toHaveLength(0); expect(fixture.db.state.loans).toHaveLength(0);
   });
 });
+
+describe("review correction through the gateway: Missing component / Existing damage need a note", () => {
+  // The browser form is bypassed here: Loans must refuse on its own, and the
+  // gateway must pass the approved message through unchanged.
+  it.each([
+    ["missing", "an omitted note", (row: Row) => ({ kitComponentId: row.kitComponentId, checked: row.checked, conditionStatus: "missing" })],
+    ["missing", "a whitespace-only note", (row: Row) => ({ ...row, conditionStatus: "missing", notes: " \t " })],
+    ["damaged", "an empty note", (row: Row) => ({ ...row, conditionStatus: "damaged", notes: "" })],
+    ["damaged", "a whitespace-only note", (row: Row) => ({ ...row, conditionStatus: "damaged", notes: "\n  " })],
+  ])("refuses %s with %s; nothing reaches Equipment or Users", async (condition, _name, change) => {
+    const body = { ...confirmBody(checklist((row, i) => (i === 0 ? change(row) : row))), acknowledgedMissing: condition === "missing" ? [kitComponents[0].id] : [] };
+    const response = await post(body);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "invalid_handover", error: "Add a note to every row marked Missing component or Existing damage." });
+    expect(fixture.requests.filter(r => r.service === "equipment" || r.service === "users")).toHaveLength(0);
+    expect(fixture.db.state.loans).toHaveLength(0); expect(fixture.db.state.records).toHaveLength(0); expect(fixture.status).toBe("reserved");
+  });
+});

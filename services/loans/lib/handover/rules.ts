@@ -3,6 +3,8 @@
 import {
   HANDOVER_MAX_ROWS,
   HANDOVER_NOTES_MAX_LENGTH,
+  HANDOVER_NOTE_REQUIRED_MESSAGE,
+  hasRequiredHandoverNote,
   isConditionStatus,
   isProfileId,
   type ConfirmHandoverInput,
@@ -11,6 +13,8 @@ import {
 import type { HandoverKitComponent } from "./equipment-port";
 
 export class HandoverRuleError extends Error {}
+/** A Missing component / Existing damage row without a note (approved wording). */
+export class HandoverNoteRequiredError extends HandoverRuleError {}
 
 /** Shape validation and normalization. Confirmation is checked separately. */
 export function validateHandoverInput(value: unknown): ConfirmHandoverInput {
@@ -34,6 +38,8 @@ export function validateHandoverInput(value: unknown): ConfirmHandoverInput {
     if (row.notes !== undefined && row.notes !== null && typeof row.notes !== "string") throw new HandoverRuleError("Notes must be text.");
     const notes = typeof row.notes === "string" ? row.notes.trim() : "";
     if (notes.length > HANDOVER_NOTES_MAX_LENGTH) throw new HandoverRuleError("Notes are too long.");
+    // Omitted, null, empty and whitespace-only notes all normalize to "".
+    if (!hasRequiredHandoverNote({ conditionStatus: row.conditionStatus, notes })) throw new HandoverNoteRequiredError(HANDOVER_NOTE_REQUIRED_MESSAGE);
     return { kitComponentId: componentId, checked: row.checked, conditionStatus: row.conditionStatus, notes };
   });
   // Order carries no meaning; a stable order keeps retry fingerprints equal.
