@@ -1,7 +1,7 @@
 # Disposable PostgreSQL migration test
 
-This harness verifies migrations 003-005 and the proposed service-isolation
-migration 006 without contacting Supabase. It uses
+This harness verifies migrations 003-007, S2-02, and the C430PRJCT-40 S2-09
+handover migration without contacting Supabase. It uses
 PostgreSQL 16 in Docker, binds only to `127.0.0.1:55432`, stores the database in
 container `tmpfs`, and removes the container when the run finishes. The fixed
 database password and records are synthetic local-test values, not secrets.
@@ -10,9 +10,10 @@ database password and records are synthetic local-test values, not secrets.
 
 The container initializes from the repository's existing `database/schema.sql`,
 `database/triggers.sql`, and request-key migration. The runner then executes the
-existing read-only preflight and applies the existing 003, 004, and 005 files in
-order, then applies and verifies 006. It stops after any failed preflight,
-migration, SQL assertion, or focused application test.
+existing read-only preflight and applies 003, 004, 005, 006, S2-02, S2-09, and
+007 in that order, verifying each migration and the combined final permissions.
+It stops after any failed preflight, migration, SQL assertion, or focused
+application test.
 
 `00_supabase_compat.sql` supplies the `auth.users(id)` object and synthetic
 `anon`/`authenticated` roles needed to exercise the Supabase-specific revoke
@@ -41,25 +42,43 @@ loopback database created by this harness.
 Expected final output:
 
 ```text
-PASS: migrations 003-006, S2-02 and C430PRJCT-40, plus the focused microservice integration checks, passed locally.
+PASS: migrations 003-007, S2-02 and C430PRJCT-40, plus the focused microservice integration checks, passed locally.
 ```
 
 The focused tests cover migrated column definitions, both unique partial
 indexes, immutable history, migration 005 ownership triggers, exact replay,
 conflicting replay, keyed no-ops, legacy ownership clearing, stale ABA undo
 rejection, and a clean/replayed Loans return using the production Loans service
-and Equipment transaction function against real PostgreSQL. Migration 006 also
+as the restricted `unitrack_loans_service` role and the Equipment transaction
+function against real PostgreSQL. Migration 006 also
 checks password-free group roles, least-privilege grants, RLS policies, owned
 table operations, sequence access, and denied cross-service table reads.
+Migration 007 checks immutable loan and condition history, pickup and return
+condition INSERT permissions, recovery/compensation state transitions, a
+commit-time completed-return invariant, and compatibility with legacy returned
+loans.
+
+## Combined S2-09 / S2-13 integration
+
+S2-09 runs after S2-02 and before 007. Migration 007 deliberately runs last for
+`public.loans`, so the final Loans ACL is column-level UPDATE on only
+`returned_at` and `return_operation`. It does not revoke S2-09's loan INSERT
+columns or any `public.reservations` permissions. S2-09's immutable student
+confirmation and university-ID evidence trigger remains installed alongside
+007's custody triggers. The runner verifies S2-09 both before and after 007,
+then runs the restricted-role handover and Return PostgreSQL suites.
 
 After 006 the runner applies LJ's S2-02 migration (`S2-02_no_double_booking.sql`,
 the exclusion constraint `reservations_no_overlapping_confirmed`) and runs
 `verify_S2-02.sql`. It then applies the C430PRJCT-40 (S2-09 handover) migration
-twice to prove it is idempotent, runs `verify_C430PRJCT-40.sql`, re-runs
-`verify_S2-02.sql` (the handover migration must leave the constraint intact), and runs
+twice to prove it is idempotent, runs `verify_C430PRJCT-40.sql`, and re-runs
+`verify_S2-02.sql` (the handover migration must leave the constraint intact).
+It then seeds one legacy returned loan, applies and verifies 007, and re-runs
+the S2-09 verification against the final custody permissions. Finally it runs
+`services/loans/tests/postgres-migrations.integration.test.ts` and
 `services/loans/tests/postgres-handover.integration.test.ts` with Loans and
-Equipment connected as their restricted 006 group roles. That test creates its
-own synthetic lab, kits, components and reservations.
+Equipment connected as their restricted 006 group roles. The handover test
+creates its own synthetic lab, kits, components and reservations.
 
 **Synthetic permission (not LJ's migration).** Handover marks the reservation
 `fulfilled`, which needs `UPDATE (status)` on `public.reservations` for the
@@ -81,6 +100,12 @@ clicking through `/handover/[reservationId]`, with each service connecting as it
 own restricted 006 login; see
 [docs/handover-s2-09.md](../../docs/handover-s2-09.md). It is never run by the
 runner and must never be run against Supabase.
+
+The manual fixture labels reservation `...9922` as B1-B3 and `...9923` as B4.
+After the tester completes those browser cases,
+`verify_handover_browser_b1_b4.sql` performs read-only checks of their persisted
+loan, fulfilment, evidence, and pickup-condition results. It does not verify or
+pre-approve the browser observations.
 
 If a run is interrupted, remove only this explicitly named local Compose
 project:

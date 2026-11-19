@@ -25,8 +25,8 @@ ON CONFLICT DO NOTHING;
 
 INSERT INTO public.equipment_items (id, asset_code, name, category_id, lab_id, status, condition) VALUES
   ('00000000-0000-4000-8000-000000009911', 'HO-DEMO-KIT-1', 'Demo Camera Kit (TC-3.1)', 7301, 7301, 'reserved', 'good'),
-  ('00000000-0000-4000-8000-000000009912', 'HO-DEMO-KIT-2', 'Demo Camera Kit (TC-3.4)', 7301, 7301, 'reserved', 'good'),
-  ('00000000-0000-4000-8000-000000009913', 'HO-DEMO-SCOPE', 'Demo Oscilloscope (TC-3.5, non-kit)', 7301, 7301, 'reserved', 'good'),
+  ('00000000-0000-4000-8000-000000009912', 'HO-B1-B3-KIT', 'Required-note Camera Kit (B1-B3)', 7301, 7301, 'reserved', 'good'),
+  ('00000000-0000-4000-8000-000000009913', 'HO-B4-SCOPE', 'Required-note Oscilloscope (B4, non-kit)', 7301, 7301, 'reserved', 'good'),
   ('00000000-0000-4000-8000-000000009914', 'HO-DEMO-KIT-3', 'Demo Camera Kit (TC-3.7)', 7301, 7301, 'reserved', 'good')
 ON CONFLICT DO NOTHING;
 
@@ -54,6 +54,11 @@ ON CONFLICT DO NOTHING;
 
 COMMIT;
 
-SELECT r.id AS reservation_id, i.asset_code, i.name, i.status AS equipment_status
+SELECT CASE r.id
+         WHEN '00000000-0000-4000-8000-000000009922' THEN 'B1-B3'
+         WHEN '00000000-0000-4000-8000-000000009923' THEN 'B4'
+         ELSE 'support'
+       END AS browser_case,
+       r.id AS reservation_id, i.asset_code, i.name, i.status AS equipment_status
 FROM public.reservations r JOIN public.equipment_items i ON i.id = r.item_id
 WHERE r.lab_id = 7301 ORDER BY i.asset_code;

@@ -57,9 +57,11 @@ let failNextCheckout = false;
 // Hooks inject real database events between the Saga's steps.
 const hooks: { beforeApply?: () => Promise<void>; afterApply?: () => Promise<void>; beforeUndo?: () => Promise<void> } = {};
 function restricted(role: string): Pool {
-  const pool = new Pool({ connectionString: configuredDatabaseUrl, max: 4 });
-  pool.on("connect", client => { void client.query("SET ROLE " + role); });
-  return pool;
+  return new Pool({
+    connectionString: configuredDatabaseUrl,
+    max: 4,
+    options: `-c role=${role}`,
+  });
 }
 
 // Equipment port backed by Equipment's real SQL under its restricted role.
@@ -475,9 +477,11 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
   it("the student confirmation and university-ID check are immutable for the restricted Loans role; Return-style updates still work", async () => {
     const [loan] = await loansFor(reservations.tc34);
     expect(loan.university_id_verified_by).toBe(assistantId);
-    await expect(loansPool.query("update public.loans set university_id_verified_at = null, university_id_verified_by = null where id = $1", [loan.id])).rejects.toMatchObject({ code: "P0001" });
-    await expect(loansPool.query("update public.loans set university_id_verified_by = $2 where id = $1", [loan.id, otherAssistantId])).rejects.toMatchObject({ code: "P0001" });
-    await expect(loansPool.query("update public.loans set student_confirmed_at = null where id = $1", [loan.id])).rejects.toMatchObject({ code: "P0001" });
+    // Migration 007 removes evidence UPDATE privileges entirely; the S2-09
+    // trigger remains a second line of defence and is verified as owner in SQL.
+    await expect(loansPool.query("update public.loans set university_id_verified_at = null, university_id_verified_by = null where id = $1", [loan.id])).rejects.toMatchObject({ code: "42501" });
+    await expect(loansPool.query("update public.loans set university_id_verified_by = $2 where id = $1", [loan.id, otherAssistantId])).rejects.toMatchObject({ code: "42501" });
+    await expect(loansPool.query("update public.loans set student_confirmed_at = null where id = $1", [loan.id])).rejects.toMatchObject({ code: "42501" });
     await expect(loansPool.query("update public.loans set return_operation = return_operation where id = $1", [loan.id])).resolves.toBeDefined();
   });
 

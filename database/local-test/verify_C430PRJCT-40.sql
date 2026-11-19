@@ -1,5 +1,17 @@
--- Disposable local verification for C430PRJCT-40 / S2-09 (run after 006 + S2-09).
+-- Disposable local verification for C430PRJCT-40 / S2-09. This file is run
+-- once immediately after S2-09 and again after migration 007 so the final
+-- restricted custody permissions are verified without weakening S2-09.
 DO $$
+DECLARE
+  custody_007 boolean := EXISTS (
+    SELECT 1
+    FROM pg_trigger
+    WHERE tgrelid = 'public.loans'::regclass
+      AND tgname = 'loans_require_completed_return_at_commit'
+      AND tgenabled <> 'D'
+      AND NOT tgisinternal
+  );
+  service_table_grants integer;
 BEGIN
   IF (SELECT data_type || '/' || is_nullable FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'loans' AND column_name = 'student_confirmed_at')
@@ -61,16 +73,35 @@ BEGIN
     RAISE EXCEPTION 'S2-09 verification failed: Loans column grants do not match the reviewed matrix';
   END IF;
 
+  IF custody_007 THEN
+    IF has_table_privilege('unitrack_loans_service', 'public.loans', 'UPDATE')
+       OR NOT has_column_privilege('unitrack_loans_service', 'public.loans', 'returned_at', 'UPDATE')
+       OR NOT has_column_privilege('unitrack_loans_service', 'public.loans', 'return_operation', 'UPDATE')
+       OR has_column_privilege('unitrack_loans_service', 'public.loans', 'student_confirmed_at', 'UPDATE')
+       OR has_column_privilege('unitrack_loans_service', 'public.loans', 'university_id_verified_at', 'UPDATE')
+       OR has_column_privilege('unitrack_loans_service', 'public.loans', 'university_id_verified_by', 'UPDATE') THEN
+      RAISE EXCEPTION 'S2-09 verification failed: migration 007 final Loans UPDATE ACL is not restricted';
+    END IF;
+  ELSIF NOT has_table_privilege('unitrack_loans_service', 'public.loans', 'UPDATE') THEN
+    RAISE EXCEPTION 'S2-09 verification failed: pre-007 Return UPDATE grant is missing';
+  END IF;
+
   IF has_any_column_privilege('unitrack_equipment_service', 'public.loans', 'SELECT')
      OR has_any_column_privilege('unitrack_users_service', 'public.reservations', 'SELECT')
      OR has_any_column_privilege('unitrack_equipment_service', 'public.reservations', 'UPDATE') THEN
     RAISE EXCEPTION 'S2-09 verification failed: another service can access Loans tables';
   END IF;
 
-  -- 006's reviewed table-level matrix and policy pattern are unchanged.
-  IF (SELECT count(*) FROM information_schema.role_table_grants
-      WHERE grantee IN ('unitrack_users_service', 'unitrack_equipment_service', 'unitrack_loans_service')
-        AND table_schema = 'public') <> 18
+  -- Migration 007 deliberately replaces one of 006's table grants (Loans
+  -- UPDATE on loans) with two column grants. Every other 006 grant and policy
+  -- remains unchanged.
+  SELECT count(*)
+  INTO service_table_grants
+  FROM information_schema.role_table_grants
+  WHERE grantee IN ('unitrack_users_service', 'unitrack_equipment_service', 'unitrack_loans_service')
+    AND table_schema = 'public';
+
+  IF service_table_grants <> (CASE WHEN custody_007 THEN 17 ELSE 18 END)
      OR (SELECT count(*) FROM pg_policies WHERE schemaname = 'public'
          AND policyname LIKE 'unitrack\_%\_service\_%' ESCAPE '\') <> 18 THEN
     RAISE EXCEPTION 'S2-09 verification failed: 006 table grants or policies changed';
@@ -90,6 +121,14 @@ BEGIN
       WHERE tgname IN ('loans_prevent_delete', 'condition_records_prevent_delete', 'equipment_status_history_immutable')
         AND tgenabled <> 'D' AND NOT tgisinternal) <> 3 THEN
     RAISE EXCEPTION 'S2-09 verification failed: custody/history protection triggers changed';
+  END IF;
+
+  IF custody_007 AND (SELECT count(*) FROM pg_trigger
+      WHERE tgrelid IN ('public.loans'::regclass, 'public.condition_records'::regclass)
+        AND tgname IN ('condition_records_prevent_update', 'loans_protect_updates',
+                       'loans_require_completed_return_at_commit')
+        AND tgenabled <> 'D' AND NOT tgisinternal) <> 3 THEN
+    RAISE EXCEPTION 'S2-09 verification failed: migration 007 custody triggers changed';
   END IF;
 END;
 $$;
@@ -158,9 +197,54 @@ INSERT INTO public.loans (id, item_id, borrower_id, lab_id, due_date, student_co
 VALUES ('00000000-0000-4000-8000-000000000498', '00000000-0000-4000-8000-000000000101',
         '00000000-0000-4000-8000-000000000002', 7001, now() + interval '1 day', now(),
         now(), '00000000-0000-4000-8000-000000000001');
--- The existing Return workflow's updates still work on a handover loan.
-UPDATE public.loans SET return_operation = '{"state":"planned"}'::jsonb WHERE id = '00000000-0000-4000-8000-000000000498';
-UPDATE public.loans SET returned_at = now() + interval '1 second' WHERE id = '00000000-0000-4000-8000-000000000498';
+-- The existing Return workflow's complete state sequence still works on a
+-- handover loan, both before and after migration 007.
+UPDATE public.loans
+SET return_operation = jsonb_build_object(
+  'fingerprint', repeat('a', 64),
+  'key', 'return:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  'attempt', 0,
+  'actor', '00000000-0000-4000-8000-000000000001',
+  'previous', 'checked_out',
+  'state', 'planned',
+  'result', jsonb_build_object(
+    'loanId', id::text,
+    'status', 'available',
+    'isLate', false,
+    'returnedAt', now() + interval '1 second'
+  )
+)
+WHERE id = '00000000-0000-4000-8000-000000000498';
+UPDATE public.loans
+SET return_operation = jsonb_set(return_operation, '{state}', '"applied"')
+WHERE id = '00000000-0000-4000-8000-000000000498';
+UPDATE public.loans
+SET returned_at = (return_operation->'result'->>'returnedAt')::timestamptz
+WHERE id = '00000000-0000-4000-8000-000000000498';
+UPDATE public.loans
+SET return_operation = jsonb_set(return_operation, '{state}', '"completed"')
+WHERE id = '00000000-0000-4000-8000-000000000498';
+
+-- Restricted callers must not be able to rewrite handover evidence. Before
+-- 007 the S2-09 trigger rejects this; after 007 the narrower ACL rejects it.
+DO $$
+BEGIN
+  BEGIN
+    UPDATE public.loans
+    SET student_confirmed_at = NULL
+    WHERE id = '00000000-0000-4000-8000-000000000498';
+    RAISE EXCEPTION 'S2-09 verification failed: restricted Loans rewrote handover evidence';
+  EXCEPTION
+    WHEN insufficient_privilege THEN NULL;
+    WHEN raise_exception THEN
+      IF SQLERRM NOT LIKE 'loans.student_confirmed_at cannot be changed%' THEN RAISE; END IF;
+  END;
+END;
+$$;
+
+-- Prove the evidence trigger itself still protects rows even for the table
+-- owner; this remains meaningful after 007 removes evidence UPDATE privileges.
+RESET ROLE;
 DO $$
 BEGIN
   BEGIN

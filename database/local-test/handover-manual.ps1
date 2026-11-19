@@ -1,8 +1,9 @@
 # Manual S2-09 handover testing on a DISPOSABLE local PostgreSQL (never Supabase).
-#   -Action Setup     start container, apply 003-006 + S2-02 + C430PRJCT-40, apply the
-#                     SYNTHETIC S2-01 status grant (stand-in, not LJ's
-#                     migration), create restricted service logins, load the
-#                     synthetic fixture
+#   -Action Setup     start container, apply 003-006 + S2-02 + C430PRJCT-40 +
+#                     007 in production order, verify the combined permissions,
+#                     apply the SYNTHETIC S2-01 status grant (stand-in, not LJ's
+#                     migration), create restricted service logins, and load the
+#                     synthetic browser fixture
 #   -Action Run       start ONE service with its own restricted DATABASE_URL;
 #                     the terminal's previous values are restored on exit
 #   -Action Teardown  remove the container and its temporary data
@@ -46,6 +47,12 @@ switch ($Action) {
         'S2-02_no_double_booking', 'C430PRJCT-40_S2-09_handover_confirmation')) {
       Invoke-Psql @('--quiet', '--file', "/workspace/database/migrations/$migration.sql") "Migration $migration"
     }
+    Invoke-Psql @('--file', '/workspace/database/local-test/verify_S2-02.sql') 'S2-02 verification'
+    Invoke-Psql @('--file', '/workspace/database/local-test/verify_C430PRJCT-40.sql') 'S2-09 verification before 007'
+    Invoke-Psql @('--file', '/workspace/database/local-test/prepare_007_legacy.sql') 'Migration 007 legacy fixture'
+    Invoke-Psql @('--quiet', '--file', '/workspace/database/migrations/007_custody_record_protection.sql') 'Migration 007 custody protection'
+    Invoke-Psql @('--file', '/workspace/database/local-test/verify_007.sql') 'Migration 007 verification'
+    Invoke-Psql @('--file', '/workspace/database/local-test/verify_C430PRJCT-40.sql') 'S2-09 verification after 007'
     # SYNTHETIC stand-in for LJ's S2-01 UPDATE (status) grant (handover marks the
     # reservation fulfilled). Local only; not her migration. See the file header.
     Invoke-Psql @('--file', '/workspace/database/local-test/SYNTHETIC_s2-01_reservation_status_grant.sql') 'SYNTHETIC S2-01 status grant'

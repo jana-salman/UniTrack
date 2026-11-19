@@ -68,8 +68,24 @@ try {
   Write-Host 'Re-verifying S2-02 after the handover migration (constraint must be untouched)...'
   Invoke-PsqlFile '/workspace/database/local-test/verify_S2-02.sql' 'Migration S2-02 re-verification'
 
+  Write-Host 'Seeding a legacy returned loan before migration 007...'
+  Invoke-PsqlFile '/workspace/database/local-test/prepare_007_legacy.sql' 'Migration 007 legacy fixture'
+
+  Write-Host 'Applying migration 007 custody protection locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/007_custody_record_protection.sql' 'Migration 007 custody protection'
+
+  Write-Host 'Verifying migration 007 custody protection locally...'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_007.sql' 'Migration 007 verification'
+
+  Write-Host 'Re-verifying C430PRJCT-40 after final custody restrictions...'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_C430PRJCT-40.sql' 'Combined C430PRJCT-40 and migration 007 verification'
+
   Push-Location $repositoryRoot
   try {
+    Write-Host 'Building shared workspace packages used by the integration tests...'
+    npm run build:packages
+    Assert-LastExitCode 'Shared package build'
+
     Write-Host 'Running the existing static migration compatibility test...'
     npm test --workspace=@unitrack/equipment -- --run tests/migration-compatibility.test.ts
     Assert-LastExitCode 'Static migration compatibility test'
@@ -98,7 +114,7 @@ try {
     Pop-Location
   }
 
-  Write-Host 'PASS: migrations 003-006, S2-02 and C430PRJCT-40, plus the focused microservice integration checks, passed locally.'
+  Write-Host 'PASS: migrations 003-007, S2-02 and C430PRJCT-40, plus the focused microservice integration checks, passed locally.'
 }
 finally {
   if ($containerStarted) {

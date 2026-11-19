@@ -183,8 +183,8 @@ retry replays the same key). Use **Retry the same handover**.
 
 ## Migration — `database/migrations/C430PRJCT-40_S2-09_handover_confirmation.sql`
 
-Apply **after 004 and 006**, by the database owner, in a controlled step. Not run
-by the app. Additive and idempotent:
+Apply **after 006 and S2-02, and before migration 007**, by the database owner,
+in a controlled step. Not run by the app. Additive and idempotent:
 
 - `loans.student_confirmed_at TIMESTAMPTZ` (nullable; existing loans stay NULL).
 - `loans.university_id_verified_at TIMESTAMPTZ` and
@@ -204,16 +204,18 @@ by the app. Additive and idempotent:
   grant / RLS for fulfilment").
 - Trigger `loans_student_confirmation_immutable`: `student_confirmed_at` and the
   two university-ID columns cannot be added, changed or cleared after the loan
-  row exists (006 gives Loans
-  table-level UPDATE on loans). Return's `returned_at`/`return_operation` updates
-  are unaffected (verified as the restricted role).
+  row exists. Migration 007 later removes Loans' table-level UPDATE and permits
+  only `returned_at`/`return_operation`; this trigger remains installed as
+  defence in depth. Return updates are unaffected (verified as the restricted
+  role before and after 007).
 - Two RLS policies (`c430prjct_40_loans_handover_insert` requiring
   `student_confirmed_at`, `university_id_verified_at` and
   `university_id_verified_by` NOT NULL and `returned_at IS NULL`, and
   `c430prjct_40_reservations_handover_update`). These policies are verified
   explicitly, not hidden from 006's checks: `verify_C430PRJCT-40.sql` asserts
-  each one by name, table, command and role. It also asserts that 006's
-  18-grant / 18-policy matrix is unchanged. The restricted-role PostgreSQL tests
+  each one by name, table, command and role. Before 007 it asserts 006's
+  18-grant / 18-policy matrix; after 007 it requires the intended 17 table grants,
+  18 policies, and column-only Return UPDATE access. The restricted-role PostgreSQL tests
   exercise the insert rule (a loan without confirmation or ID-check evidence →
   42501). `postflight_006_read_only.sql` counts only 006's own policies, so it
   does not cover these additions; their verification lives in this card's
@@ -236,6 +238,14 @@ handover loan: the loan kept its values (ID-check columns NULL, nothing
 backfilled) and a second run was a no-op.
 
 **Full `run.ps1` passed on 2026-11-19 after merging `main` (PR #26, S2-02) and the review corrections** (fresh container, the ACTUAL merged migration files): preflight gates PASS; 003, 004, 005, 006 verified; **LJ's real `S2-02_no_double_booking.sql`** applied and `verify_S2-02.sql` PASS; this migration applied twice and `verify_C430PRJCT-40.sql` PASS; `verify_S2-02.sql` re-run PASS (constraint untouched); static migration compatibility 6/6; Equipment/Loans PostgreSQL suite (including LJ's S2-02 test) 4/4; handover PostgreSQL suite 26/26 as restricted roles.
+
+**Combined S2-02 + S2-09 + S2-13 run passed on 2026-11-19 after integrating
+main through PR #27.** The fresh disposable database applied S2-09 before 007;
+`verify_C430PRJCT-40.sql` passed both before and after 007; migration 007 and
+its final-row/ACL verification passed; static migration tests were 6/6;
+Equipment/Loans PostgreSQL tests were 6/6; and restricted-role handover tests
+were 26/26. The runner builds the current shared contracts first, so its
+`canonicalChecklist` runtime export cannot come from stale package output.
 
 What that run does and does not prove:
 
@@ -356,7 +366,11 @@ operation is released only by **Finish interrupted handover** — which ends in
 or by a lab manager's reconciliation (no tool; existing accepted scope). No
 timeout, age or session end releases it.
 
-### Coordination contract for LJ (S2-01) — proposed; technical agreement PENDING
+### Coordination contract for LJ (S2-01) — C1-C6 confirmed technical requirements
+
+C1-C6 are the agreed integration requirements for LJ's S2-01 implementation.
+S2-09 documents and tests its side of the contract but does not implement LJ's
+reservation endpoints, guards, or production grant.
 
 - **C1 — common per-item lock.** Every Loans transaction that creates,
   confirms, cancels, expires or otherwise changes a reservation's status first
@@ -379,7 +393,7 @@ timeout, age or session end releases it.
   `start_at`, `end_at` (decision 7; rescheduling = cancel + new, allowed only
   under C3).
 - **C6 — never write `handover_operation`.**
-- **C7 — PROPOSAL ONLY, requires LJ/JS review (not agreed, not implemented):**
+- **C7 — OUT OF SCOPE (not agreed and not implemented by S2-09):**
   a `fulfilled` reservation leaves S2-02's `WHERE (status = 'confirmed')`, so a
   new booking could overlap the window of equipment that is out on loan. One
   option is extending the constraint to `WHERE (status IN ('confirmed',
@@ -387,7 +401,8 @@ timeout, age or session end releases it.
   fulfilled window keeps blocking re-booking after the item comes back early
   (Return does not change the reservation), and it does not cover a loan that
   runs past `end_at`. Alternatives (e.g. relying on handover's active-loan check
-  only, or ending the fulfilled window at return) are for LJ/JS to weigh.
+  only, or ending the fulfilled window at return) require separate Product
+  Owner and technical work outside this integration.
   **Observed with LJ's merged S2-02 (real PostgreSQL, 2026-11-19):** after a
   handover marks a reservation `fulfilled`, an overlapping reservation for the
   same item CAN be confirmed (the constraint no longer sees the fulfilled row);
@@ -537,9 +552,9 @@ WITH =, tstzrange(start_at, end_at, '[)') WITH &&) WHERE (status =
 
 - `database/local-test/run.ps1` keeps both sequences: S2-02 + `verify_S2-02.sql`
   (production order: it is already on `main`), then this migration twice +
-  `verify_C430PRJCT-40.sql`, then `verify_S2-02.sql` again.
-  `handover-manual.ps1` also applies S2-02 so browser checks use the merged
-  schema.
+  `verify_C430PRJCT-40.sql`, then `verify_S2-02.sql` again, then 007 and both
+  custody and S2-09 verification. `handover-manual.ps1` uses the same production
+  order so browser checks use the merged schema and final restricted ACL.
 - The PostgreSQL fixtures no longer insert a second overlapping `confirmed`
   reservation (the constraint correctly rejects it; it is not disabled).
   Instead: the overlap reservation is seeded `pending`; the test asserts that
@@ -554,6 +569,16 @@ WITH =, tstzrange(start_at, end_at, '[)') WITH &&) WHERE (status =
   keeps it as defence in depth; it stays covered by the modelled-database unit
   tests (plan time and final transaction).
 - See C7 for `fulfilled` (observed behaviour recorded there).
+
+### S2-13 custody protection — merged in PR #27; compatibility verified
+
+Migration 007 runs after S2-09. It revokes 006's table-level Loans UPDATE and
+grants only `UPDATE (returned_at, return_operation)`, while leaving S2-09's
+column-level handover loan INSERT and reservation permissions intact. The
+student-confirmation/ID-evidence trigger and 007's loan/condition triggers all
+remain enabled. Restricted-role tests prove handover creation, evidence denial,
+condition immutability, valid Return completion/replay, compensation/retry, and
+the deferred final-return invariant together.
 
 ### Other remaining limits (unchanged)
 
@@ -593,7 +618,8 @@ WITH =, tstzrange(start_at, end_at, '[)') WITH &&) WHERE (status =
 
 `database/local-test/handover-manual.ps1 -Action Setup -AssistantId <your
 Supabase user ID> -AssistantEmail <your email>` starts a local container, applies
-003-006, S2-02 and this migration, creates `unitrack_{users,equipment,loans}_local`
+003-006, S2-02, this migration, and 007 in production order, verifies S2-09
+before and after 007, and creates `unitrack_{users,equipment,loans}_local`
 LOGIN accounts that only inherit their 006 group roles
 (`manual_service_logins.sql`), and loads `handover_manual_fixture.sql`. Then run
 `-Action Run -Service users|equipment|loans` in three terminals. Setup also
@@ -635,26 +661,46 @@ confirmation reset after editing a row, page reload / retry of a completed
 handover, the uncertain-outcome and "Finish interrupted handover" screens, and
 Return of these loans.
 
-### Focused browser re-checks needed after the note validation (NOT yet run)
+### Focused B1-B4 browser re-check results after note validation
 
-The run above **predates** the required-note rule and the merge of S2-02, so it
-does not show the new behaviour. Re-running every scenario is unnecessary: the
-TC-3.1 path (all Good, no notes), identity, the ID check and fulfilment are
-unchanged and covered by the automated suites. Only these checks, on a fresh
-`handover-manual.ps1 -Action Setup` (now including S2-02, still with the
-SYNTHETIC grant):
+**Run of 2026-11-19 (JS):** JS executed all four required manual acceptance
+tests on a fresh isolated `handover-manual.ps1 -Action Setup`. The setup applied
+S2-02, S2-09 and S2-13 in production order and used the **SYNTHETIC local S2-01
+status grant** so the restricted Loans login could fulfil reservations. This
+grant was test-only, was not applied to shared Supabase, and is not a substitute
+for LJ's real S2-01 migration and locking integration, which remain pending.
 
-| # | Reservation | Steps | Expected |
-|---|---|---|---|
-| B1 | `…9922` (kit) | Tick all rows; Charger → Missing component, note left empty; tick ID check and student confirmation; Complete handover | Label reads "Notes (required)" with "Describe what is missing."; red error "Add a note to every row marked Missing component or Existing damage."; nothing sent; item still Reserved, 0 loans |
-| B2 | `…9922` | Type only spaces in the Charger note; Complete handover | Same refusal (whitespace is not a note) |
-| B3 | `…9922` | Enter "Charger not in the case" | Student confirmation is cleared ("must confirm again"); after reconfirming, Borrowed; Charger `missing` with that note; reservation `fulfilled` |
-| B4 | `…9923` (non-kit) | Main item → Existing damage, note empty, both boxes ticked → refused; then enter a note, reconfirm, complete | Refused first with the same message; then Borrowed, one `damaged` pickup row with the note |
-| B5 | `…9924` (kit, optional) | One row → Needs attention with no note; complete | Accepted (notes stay optional for Needs attention and Good) |
+| Case | Reservation | JS browser result | Read-only local database result | Result |
+|---|---|---|---|---|
+| B1 | `…9922` (kit) | Empty note for Charger marked Missing component was rejected | Reservation remained `confirmed`, Equipment remained `reserved`, and there were 0 loans | **Pass** |
+| B2 | `…9922` | Whitespace-only missing-component note was rejected | Same persisted state as B1: `confirmed`, `reserved`, 0 loans | **Pass** |
+| B3 | `…9922` | Valid note `Charger not in the case` was accepted | Exactly 1 loan and 6 pickup records (main item plus five components); reservation `fulfilled`; handover operation `completed`; Equipment `checked_out`; student-confirmation and university-ID-verification evidence persisted | **Pass** |
+| B4 | `…9923` (non-kit) | Existing damage with an empty note was rejected; after entering `Crack on front casing`, the handover was accepted | Exactly 1 loan and 1 damaged pickup record with the valid note; reservation `fulfilled`; handover operation `completed`; Equipment `checked_out`; student-confirmation and university-ID-verification evidence persisted | **Pass** |
 
-Record only what is actually seen; database checks read-only, as before. The
-scan page's "Proceed to Handover" link is still disabled on `main` (SC), so
-open `/handover/<reservation id>` directly.
+The final persisted-result verifier
+`verify_handover_browser_b1_b4.sql` also passed after B3 and B4. It verified the
+database results independently of the browser observations. Optional B5 was not
+part of the requested B1-B4 acceptance run and is not recorded as passed.
+
+The scan page's "Proceed to Handover" link is still disabled on `main` (SC), so
+the dedicated `/handover/<reservation id>` routes were used directly.
+
+Dedicated local fixture routes:
+
+- B1-B3: `http://localhost:3000/handover/00000000-0000-4000-8000-000000009922`
+  (`HO-B1-B3-KIT`, main item + Charger, Cable, Battery, Case, Tripod).
+- B4: `http://localhost:3000/handover/00000000-0000-4000-8000-000000009923`
+  (`HO-B4-SCOPE`, non-kit main item only).
+
+The signed-in account is the existing Supabase Auth account whose UUID/email
+were passed to `handover-manual.ps1 -Action Setup`; the local fixture gives that
+profile the `lab_assistant` role in lab 7301. The borrower is the synthetic
+same-lab active Student `Demo Student`; the student does not sign in.
+
+After JS completed B3 and B4 in the browser, the read-only
+`verify_handover_browser_b1_b4.sql` script checked the persisted rows. The
+browser observations and the database verification are recorded separately
+above; neither was used as a substitute for the other.
 
 **Observed limitation (pre-existing, minor):** each loan's `due_date` equals
 the reservation's `end_at` truncated to the millisecond (here 257 µs earlier),
@@ -675,31 +721,30 @@ Shared Supabase was not used; no shared migration was applied.
   `start_at <= now < end_at`, automatic single selection with multiple eligible
   reservations blocking, immutable confirmed dates. Earlier: identity, recovery
   scope, uncertain-outcome UI (table at the top).
-- **Pending technical agreement (LJ/JS):** the coordination contract C1–C6 and
-  the minimal grant.
-- **Proposal needing review (LJ/JS):** C7 — whether and how S2-02's overlap
-  constraint should cover `fulfilled` reservations, including early-return
-  behaviour.
+- **Confirmed technical requirements for LJ:** implement C1-C6 and the minimal
+  status grant in S2-01; S2-09 does not duplicate that work.
+- **Out of scope:** C7 and any change to how S2-02 treats `fulfilled`
+  reservations, including early-return behaviour.
 - **Dependency (LJ, S2-01 migration):** `GRANT UPDATE (status) ON
   public.reservations TO unitrack_loans_service`. Without it no handover can
   complete (503 `reservation_fulfillment_unavailable`, nothing changed).
-- **Combined testing — partly done.** Done: S2-09 with LJ's merged S2-02
-  migration on a fresh disposable database (fixtures adapted; see "S2-02").
-  Still pending, because LJ's S2-01 status grant and reservation-write
+- **Combined automated testing:** S2-02, S2-09 and S2-13 now pass together on a
+  fresh disposable database with restricted service roles. Still pending,
+  because LJ's S2-01 status grant and reservation-write
   endpoints do not exist yet: S2-09 with that real grant and code (cancel vs.
   handover in both commit orders, every state in the table, fulfilled
   terminal, immutable dates, the common item lock). Until then fulfilment and
   locking results cover only the synthetic stand-in and the reference sketch,
   and the dependency stays **open**.
-- **Browser acceptance (NH, 2026-11-19): done** for TC-3.1, 3.4, 3.5 and the
-  TC-3.7 refusals on a disposable database with the synthetic grant (see the
-  results table), **before** the note rule. Focused re-checks B1–B5 for the
-  note rule are **pending** (see "Focused browser re-checks"). Confirmation
-  reset on edit and reload/retry were not checked in the browser.
+- **Browser acceptance:** NH's 2026-11-19 run covered TC-3.1, 3.4, 3.5 and the
+  TC-3.7 refusals before the note rule. JS's later 2026-11-19 run completed all
+  required focused B1-B4 note-validation checks and the persisted-result
+  verifier; all passed on an isolated database with the synthetic local grant.
+  Optional B5 was not run. Reload/retry was not checked in the browser.
 - **Equipment owner (component versioning):** the post-checkout component check
   narrows but cannot remove the window before the loan COMMIT (no distributed
   transaction). Equipment has no API that edits kit components today. If one is
   added, agree a version/lock contract.
-- **SN (custody):** future loan-update protection must still allow Loans to INSERT
-  handover loans and UPDATE `reservations.handover_operation` (and, with LJ's
-  grant, `status` to `fulfilled`).
+- **SN (custody): resolved.** Migration 007 preserves Loans INSERT of handover
+  loans and UPDATE of `reservations.handover_operation`; the combined suite also
+  proves `status = 'fulfilled'` using only the clearly marked synthetic LJ grant.
