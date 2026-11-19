@@ -50,3 +50,34 @@ export type { ConditionStatus, ReturnLoan, ReturnLoanWire, ReturnDetails, Pickup
 
 export { isLoanDueDate, LOANS_ERROR_CONTRACT } from "./loans.js";
 export type { LoanDueDate } from "./loans.js";
+
+export {
+  HANDOVER_CONDITION_LABELS,
+  HANDOVER_MAX_ROWS,
+  HANDOVER_NOTES_MAX_LENGTH,
+  HANDOVER_NOTE_REQUIRED_CONDITIONS,
+  HANDOVER_NOTE_REQUIRED_MESSAGE,
+  canonicalChecklist,
+  handoverNoteRequired,
+  hasRequiredHandoverNote,
+  isBorrowerVerification,
+  isEligibleBorrower,
+  isChecklistComponentSource,
+  isHandoverDetails,
+  isHandoverOutcome,
+  isHandoverPending,
+  isInterruptedHandover,
+} from "./handover.js";
+export type {
+  BorrowerVerification,
+  ChecklistComponentSource,
+  CompletedHandoverWire,
+  ConfirmHandoverInput,
+  HandoverPending,
+  HandoverPendingState,
+  InterruptedHandover,
+  HandoverConditionInput,
+  HandoverDetails,
+  HandoverOutcome,
+  HandoverReservationWire,
+} from "./handover.js";

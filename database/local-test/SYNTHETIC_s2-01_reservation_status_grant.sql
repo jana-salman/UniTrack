@@ -1,0 +1,21 @@
+-- ============================================================================
+-- SYNTHETIC — DISPOSABLE LOCAL TEST DATABASES ONLY. NOT A MIGRATION.
+-- ============================================================================
+-- Stand-in for the ONE privilege S2-09 fulfilment needs from LJ's S2-01
+-- reservation-write migration (not written yet). It lets the handover tests
+-- run on PostgreSQL as the restricted Loans group. It is NOT LJ's migration,
+-- does not reproduce her protections, and passing tests with it does NOT
+-- verify her final migration. Never apply it to shared Supabase.
+--
+-- Why only this: the S2-09 migration already gives unitrack_loans_service a
+-- FOR UPDATE policy on public.reservations (c430prjct_40_reservations_handover_update,
+-- USING (true) WITH CHECK (true)); RLS policies are per command, not per
+-- column, so the column grant below is the only missing piece for
+--   UPDATE public.reservations SET status = 'fulfilled', handover_operation = ...
+-- No new RLS policy, no table-level grant, no other column.
+--
+-- Applied by: services/loans/tests/postgres-handover.integration.test.ts
+-- (beforeAll; it also revokes/re-grants it to test the "not granted" path)
+-- and database/local-test/handover-manual.ps1 -Action Setup.
+-- Idempotent.
+GRANT UPDATE (status) ON public.reservations TO unitrack_loans_service;

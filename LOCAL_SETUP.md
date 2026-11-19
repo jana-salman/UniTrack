@@ -35,6 +35,11 @@ foreach ($source in $copies.Keys) {
 Obtain the project publishable key from a trusted teammate or the Supabase
 project dashboard and place it in Web only. Web must not have `DATABASE_URL`.
 
+Loans also needs `USERS_SERVICE_URL=http://localhost:3001` (the S2-09 handover
+verifies the reservation's borrower through Users). The Loans template includes
+it; if your `services/loans/.env.local` was created before that, add the line
+yourself. Without it, handover fails closed with a configuration error.
+
 ## 3. Add the restricted database URLs
 
 The project owner shares these values privately, preferably with expiring,
