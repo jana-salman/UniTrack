@@ -11,7 +11,7 @@ database password and records are synthetic local-test values, not secrets.
 The container initializes from the repository's existing `database/schema.sql`,
 `database/triggers.sql`, and request-key migration. The runner then executes the
 existing read-only preflight and applies 003, 004, 005, 006, S2-02, S2-09, 007,
-S2-05, and S2-01 in order, verifying each migration. S2-09 is streamed from its
+S2-05, S2-01, then the S2-01 status protection migration in order, verifying each migration. S2-09 is streamed from its
 reviewed remote-tracking Git commit into the disposable database; the teammate
 branch is not checked out or modified. It stops after any failed preflight,
 migration, SQL assertion, or focused application test.
@@ -43,7 +43,7 @@ loopback database created by this harness.
 Expected final output:
 
 ```text
-PASS: migrations 003-007, S2-01, S2-02, S2-05 and S2-09 schema integration, plus focused microservice, kit and reservation integration checks, passed locally.
+PASS: migrations 003-007, S2-01, S2-02, S2-05, S2-09 schema integration and C3/C4 status protection, plus focused local integration checks, passed.
 ```
 
 The focused tests cover S2-02 overlapping and adjacent reservations, pending
@@ -54,6 +54,9 @@ membership, soft removal and validation. The Loans PostgreSQL suite exercises
 concurrent reservation attempts, kit/component conflicts in both directions,
 component-list changes during reservations, and unchanged current equipment
 status. These suites use only the fixed loopback database.
+The restricted Loans-role status-guard suite verifies unfinished-handover
+blocks, handover completion/recovery, confirmed compensation, fulfilled
+terminality, and serialization of a cancellation attempt against handover.
 
 The focused return tests also cover migrated column definitions, both unique partial
 indexes, immutable history, migration 005 ownership triggers, exact replay,

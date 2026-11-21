@@ -72,6 +72,15 @@ also checks preservation of S2-09's separately owned permissions. The complete
 chain and focused database-backed kit/reservation tests passed against the
 disposable PostgreSQL container.
 
+The C3/C4 follow-up adds a database trigger that blocks reservation status
+changes while a handover operation is not confirmed compensated, validates
+the applied-to-completed fulfillment against its matching loan and pickup
+record, and makes fulfilled status terminal. It leaves S2-09 operation writes,
+RLS, and grants unchanged. Restricted-role PostgreSQL tests cover handover,
+recovery, compensation, terminality, and the item-lock race. There is no
+production cancellation/expiry writer; future writers must take the shared
+Loans item transaction lock before locking the reservation row.
+
 Use `npm run typegen`, `npm run typecheck`, `npm test`, `npm run lint`, and
 `npm run build` from the repository root. Run
 `& .\database\local-test\run.ps1` with Docker Desktop for the local migration

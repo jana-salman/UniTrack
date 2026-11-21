@@ -92,6 +92,10 @@ try {
   Invoke-PsqlFile '/workspace/database/migrations/S2-01_reservation_permissions.sql' 'Migration S2-01'
   Invoke-PsqlFile '/workspace/database/local-test/verify_S2-01.sql' 'Migration S2-01 verification'
 
+  Write-Host 'Applying and verifying C3/C4 reservation status protection locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/S2-01_reservation_status_protection.sql' 'Reservation status protection migration'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_S2-01_status_protection.sql' 'Reservation status protection verification'
+
   Push-Location $repositoryRoot
   try {
     Write-Host 'Running the existing static migration compatibility test...'
@@ -111,6 +115,9 @@ try {
       npm test --workspace=@unitrack/loans -- --run tests/postgres-reservations.integration.test.ts
       Assert-LastExitCode 'PostgreSQL reservation integration test'
 
+      npm test --workspace=@unitrack/loans -- --run tests/postgres-reservation-status-guard.integration.test.ts
+      Assert-LastExitCode 'PostgreSQL reservation status guard integration test'
+
     }
     finally {
       if ($null -eq $previousTestDatabaseUrl) {
@@ -125,7 +132,7 @@ try {
     Pop-Location
   }
 
-  Write-Host 'PASS: migrations 003-007, S2-01, S2-02, S2-05 and S2-09 schema integration, plus focused microservice, kit and reservation integration checks, passed locally.'
+  Write-Host 'PASS: migrations 003-007, S2-01, S2-02, S2-05, S2-09 schema integration and C3/C4 status protection, plus focused local integration checks, passed.'
 }
 finally {
   if ($containerStarted) {

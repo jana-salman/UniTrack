@@ -10,6 +10,16 @@ and PostgreSQL exclusion constraints remain the final overlap guard. Returns
 call Equipment over signed HTTP with stable idempotency keys. Web aggregates
 borrower/equipment labels through the owning services.
 
+Future reservation cancellation or expiry writers must use the same
+transaction-scoped item lock as creation and handover:
+`pg_advisory_xact_lock(hashtextextended('loans:item:' || item_id::text, 0))`.
+Read the reservation's `item_id` to name the lock, acquire the item lock first,
+then lock the reservation row with `SELECT ... FOR UPDATE` and verify the item
+did not change before updating status. Hold the lock through commit/rollback.
+There is currently no production cancellation or expiry writer. The database
+blocks status changes during unfinished handovers and makes fulfilled
+reservations terminal.
+
 Public `GET /health` is configuration-free. Business routes require verified
 internal user tokens and enforce role/lab scope. Configuration names are
 `INTERNAL_JWT_SECRET`, `DATABASE_URL`, `EQUIPMENT_SERVICE_URL`, and
