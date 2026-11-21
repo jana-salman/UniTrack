@@ -33,6 +33,9 @@ export interface CatalogueItem {
   category: string;
   status: string;
   expectedReturn: string | null;
+  isRestricted?: boolean;
+  isKit?: boolean;
+  canReserve?: boolean;
 }
 
 export function isCatalogueItem(value: unknown): value is CatalogueItem {
@@ -42,6 +45,9 @@ export function isCatalogueItem(value: unknown): value is CatalogueItem {
     && typeof value.name === "string"
     && typeof value.category === "string"
     && typeof value.status === "string"
+    && (value.isRestricted === undefined || typeof value.isRestricted === "boolean")
+    && (value.isKit === undefined || typeof value.isKit === "boolean")
+    && (value.canReserve === undefined || typeof value.canReserve === "boolean")
     && (value.expectedReturn === null
       || (typeof value.expectedReturn === "string" && Number.isFinite(Date.parse(value.expectedReturn))));
 }
@@ -51,6 +57,7 @@ export interface EquipmentItemSnapshot {
   name: string;
   lab_id: number;
   status: EquipmentStatus;
+  is_restricted?: boolean;
 }
 
 export function isEquipmentItemSnapshot(value: unknown): value is EquipmentItemSnapshot {
@@ -59,7 +66,8 @@ export function isEquipmentItemSnapshot(value: unknown): value is EquipmentItemS
     && typeof value.name === "string"
     && Number.isSafeInteger(value.lab_id)
     && (value.lab_id as number) > 0
-    && isEquipmentStatus(value.status);
+    && isEquipmentStatus(value.status)
+    && (value.is_restricted === undefined || typeof value.is_restricted === "boolean");
 }
 
 export interface EquipmentComponentSnapshot {
@@ -119,6 +127,24 @@ export const EQUIPMENT_ERROR_CONTRACT = {
     "Equipment not found or access denied.",
     "Invalid category ID.",
     "Could not update equipment.",
+    "Kit data must be an object.",
+    "Choose a valid list of distinct component items.",
+    "Invalid kit information.",
+    "A kit or component with that identifier already exists.",
+    "Every tracked component must be a different item in your laboratory.",
+    "Kit components must be available, unrestricted equipment.",
+    "Kit main item and kit must belong to the same laboratory",
+    "Invalid kit or component.",
+    "Could not process the kit request.",
+    "Invalid kit ID.",
+    "Kit not found.",
+    "That item is already a component of this kit.",
+    "Invalid component item.",
+    "Could not add this component.",
+    "Choose a valid component item.",
+    "Invalid kit or component ID.",
+    "Active kit component not found.",
+    "Could not remove this component.",
     "Invalid JSON body",
     "Invalid request body",
     "Invalid status or reason",
@@ -139,7 +165,7 @@ export const EQUIPMENT_ERROR_CONTRACT = {
   ],
   "codes": [
     "equipment_not_configured", "equipment_schema_not_ready", "equipment_database_access", "equipment_database_unavailable",
-    "equipment_status_conflict",
+    "equipment_status_conflict", "kit_conflict", "invalid_kit", "duplicate_component", "invalid_component", "kit_unavailable",
     "idempotency_key_conflict",
     "unauthenticated",
     "insufficient_role"

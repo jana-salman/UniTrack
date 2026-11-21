@@ -12,6 +12,7 @@ import {
   isProfileRole,
   isReturnDetails,
   isReturnOutcome,
+  isReservation,
   type UserIdentity,
 } from "@unitrack/contracts";
 import { createServiceCaller } from "./call-service";
@@ -100,6 +101,26 @@ export async function forwardReturn(request: Request, loanId: string): Promise<R
       borrower: { name: borrowerData?.[0]?.full_name ?? null },
       ...(partial ? { partialData: true } : {}),
     }, { headers: { "Cache-Control": "private, no-store", "X-Request-Id": identity.rid } });
+  } catch (error) {
+    if (error instanceof AuthorizationError) return Response.json({ error: error.message, code: error.code }, { status: error.status });
+    return Response.json({ error: "Loans is not configured or unavailable.", code: "loans_unavailable" }, { status: 503 });
+  }
+}
+
+export async function forwardReservation(request: Request): Promise<Response> {
+  try {
+    const identity = await trustedIdentity(request);
+    if (identity.role !== "student") return Response.json({ error: "Permission denied.", code: "forbidden" }, { status: 403 });
+    const origin = request.headers.get("origin");
+    if (origin && origin !== new URL(request.url).origin) return Response.json({ error: "Request origin is not permitted.", code: "forbidden" }, { status: 403 });
+    const body: unknown = await request.json().catch(() => null);
+    const response = await callLoans("/reservations", identity, { method: "POST", body });
+    if (!response.ok) return privateResponse(response);
+    const result: unknown = await response.json();
+    if (!isReservation(result) || result.borrower_id !== identity.sub || result.lab_id !== identity.lab_id
+      || !body || typeof body !== "object" || Array.isArray(body)
+      || result.item_id !== (body as Record<string, unknown>).itemId) return invalidServiceResponse(identity.rid);
+    return Response.json(result, { status: response.status, headers: { "Cache-Control": "private, no-store", "X-Request-Id": identity.rid } });
   } catch (error) {
     if (error instanceof AuthorizationError) return Response.json({ error: error.message, code: error.code }, { status: error.status });
     return Response.json({ error: "Loans is not configured or unavailable.", code: "loans_unavailable" }, { status: 503 });

@@ -2,11 +2,11 @@
 University equipment borrowing and management system.
 
 ## Current layout
-The implemented UniTrack scope runs as four independently deployable Next.js applications. Web keeps Supabase sessions, university-domain checks, UI, and browser-facing gateway routes; Users owns profiles/roles/labs; Equipment owns catalogue/items/status history; Loans owns due dates and the return workflow and calls Equipment over authenticated HTTP. Web has no database driver or direct SQL. Reservation creation, handover, inspection resolution, notifications, and other unfinished product features are separate from the microservice extraction.
+The implemented UniTrack scope runs as four independently deployable Next.js applications. Web keeps Supabase sessions, university-domain checks, UI, and browser-facing gateway routes; Users owns profiles/roles/labs; Equipment owns catalogue/items/kits/status history; Loans owns reservations, due dates and return workflows and calls Equipment over authenticated HTTP. Web has no database driver or direct SQL. Reservation matching and handover are teammate-owned flows; notifications and inspection resolution remain future work.
 - apps/web: pages, API routes, components, libraries, tests, public assets and app configuration.
-- services/equipment: authenticated Equipment backend and public /health.
+- services/equipment: authenticated Equipment and kit-management backend and public /health.
 - services/users: authenticated profile/role/name backend and public /health.
-- services/loans: authenticated returns/due dates, Equipment HTTP Saga and public /health.
+- services/loans: authenticated reservations, returns/due dates, Equipment HTTP adapters and public /health.
 - database: shared SQL scripts, migrations and database documentation (paths unchanged).
 - docs: project records and architecture notes.
 - Root package.json and package-lock.json: workspace commands and one dependency lockfile.

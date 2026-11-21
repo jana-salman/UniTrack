@@ -7,11 +7,34 @@ import {
 } from "@unitrack/contracts";
 import type { ReturnEquipmentPort, ReturnEquipmentItem } from "./returns/equipment-port";
 import { LoansError, LoansConfigurationError, uncertain } from "./errors";
+import { isEquipmentStatus } from "@unitrack/contracts";
 export const EQUIPMENT_TIMEOUT_MS = 3000;
+
+export interface ReservationEquipmentItem {
+  id: string;
+  lab_id: number;
+  status: string;
+  is_restricted: boolean;
+}
+export interface ReservationComponent {
+  tracked_item_id: string;
+  status: string;
+  is_restricted: boolean;
+}
+function reservationEquipmentFailure(error: unknown): never {
+  if (error instanceof LoansError && error.code === "equipment_rejected" && error.status === 404) {
+    throw new LoansError(404, "equipment_missing", "Equipment item not found.");
+  }
+  if (error instanceof LoansConfigurationError) throw error;
+  throw new LoansError(503, "reservation_equipment_unavailable", "Equipment is unavailable for reservation. Try again.");
+}
 
 // The caller supplies a VERIFIED identity. Destination is server configuration only.
 // No automatic mutation retry; the persisted Saga decides when the SAME key is safe.
-export function equipmentHttp(identity: UserIdentity): ReturnEquipmentPort {
+export function equipmentHttp(identity: UserIdentity): ReturnEquipmentPort & {
+  getReservationItem(id: string): Promise<ReservationEquipmentItem | null>;
+  getReservationComponents(id: string): Promise<ReservationComponent[]>;
+} {
   async function call(path: string, body?: unknown, key?: string): Promise<unknown> {
     let base: URL;
     const secret = process.env.INTERNAL_JWT_SECRET;
@@ -57,5 +80,28 @@ export function equipmentHttp(identity: UserIdentity): ReturnEquipmentPort {
       return { changed: data.changed };
     },
     async getComponents() { throw new Error("Components are aggregated by the gateway."); },
+    async getReservationItem(id) {
+      try {
+        const data = await call("/items/" + encodeURIComponent(id));
+        if (!data || typeof data !== "object" || Array.isArray(data)) throw uncertain();
+        const value = data as Record<string, unknown>;
+        if (value.id !== id || !Number.isSafeInteger(value.lab_id) || !isEquipmentStatus(value.status) || typeof value.is_restricted !== "boolean") throw uncertain();
+        return { id, lab_id: value.lab_id as number, status: value.status, is_restricted: value.is_restricted };
+      } catch (error) {
+        if (error instanceof LoansError && error.code === "equipment_rejected" && error.status === 404) return null;
+        reservationEquipmentFailure(error);
+      }
+    },
+    async getReservationComponents(id) {
+      let data: unknown;
+      try { data = await call("/items/" + encodeURIComponent(id) + "/reservation-components"); }
+      catch (error) { reservationEquipmentFailure(error); }
+      if (!Array.isArray(data) || !data.every(value => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+        const component = value as Record<string, unknown>;
+        return typeof component.tracked_item_id === "string" && isEquipmentStatus(component.status) && typeof component.is_restricted === "boolean";
+      })) throw uncertain();
+      return data as ReservationComponent[];
+    },
   };
 }

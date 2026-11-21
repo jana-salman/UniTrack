@@ -1,10 +1,14 @@
 # Loans Service
 
 Independent authenticated Next.js Loans backend. It owns `loans`,
-`reservations`, and `condition_records`; it never queries Users or Equipment
-tables. Current routes provide same-lab due dates and the recoverable return
-workflow. Returns call Equipment over signed HTTP with stable idempotency keys.
-Web aggregates borrower/equipment labels through the owning services.
+`reservations`, `reservation_resources`, and `condition_records`; it never
+queries Users or Equipment tables. Routes provide confirmed student
+reservations, same-lab due dates and the recoverable return workflow.
+Reservation eligibility and kit contents are checked through signed Equipment
+HTTP. Reservation writes use the shared `loans:item:<uuid>` transaction lock,
+and PostgreSQL exclusion constraints remain the final overlap guard. Returns
+call Equipment over signed HTTP with stable idempotency keys. Web aggregates
+borrower/equipment labels through the owning services.
 
 Public `GET /health` is configuration-free. Business routes require verified
 internal user tokens and enforce role/lab scope. Configuration names are

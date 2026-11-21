@@ -1,5 +1,11 @@
 # UniTrack migration handoff
 
+> Sprint 2 card implementation on `feature/S2-01-reservation` is documented in
+> [the LJ implementation and integration note](../sprint2-lj-implementation.md).
+> That current feature work supersedes the earlier statements below that
+> reservations and kit management are unimplemented; the old stage history is
+> retained as a record of the architecture migration.
+
 Current task branch: architecture/loans-service, created from the clean reviewed/fetched Users checkpoint ba735668469aa3b9d2e14272547685a7b523380c. Local/remote Users and return refs matched; no unexpected divergence. Existing return work was selectively migrated from 3f220aa090d1774f112ba888cd509bfa408461b7 without merging or changing its branch. This task implements Loans returns and catalogue due dates only, and is locally committed by the focused-review task after verification. No live SQL, shared-data writes, provisioning, deployment changes, push or merge occurred. Private environment files were not opened, read, copied, modified or displayed.
 
 **Current return implementation, migration order, retry/compensation contract and limitations:** see [loans-returns-extraction.md](loans-returns-extraction.md). Prior stage verification records below are historical. This remains a partial migration, not a completed borrowing system.

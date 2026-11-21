@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import StatusBadge from "@/components/StatusBadge";
 import { useRouter } from "next/navigation";
 import { isCatalogueItem, type CatalogueItem } from "@unitrack/contracts";
+import ReservationForm from "@/components/ReservationForm";
 
 const REFRESH_MS = 30_000; // refresh every 30 s, so changes show within 1 minute
 
@@ -120,7 +121,7 @@ export default function CatalogueClient() {
             className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
           >
             <div className="flex flex-wrap items-start justify-between gap-2">
-              <strong className="text-gray-900">{item.name}</strong>
+              <strong className="text-gray-900">{item.name}{item.isKit && <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">Kit</span>}</strong>
               <StatusBadge status={item.status} />
             </div>
             <div className="mt-1 text-sm text-gray-600">
@@ -136,6 +137,7 @@ export default function CatalogueClient() {
                 })}
               </div>
             )}
+            {item.canReserve && item.status === "Available" && !item.isRestricted && <ReservationForm itemId={item.id} itemName={item.name} />}
           </li>
         ))}
       </ul>

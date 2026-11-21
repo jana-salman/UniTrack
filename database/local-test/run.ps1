@@ -19,6 +19,14 @@ function Invoke-PsqlFile([string]$path, [string]$step) {
     --dbname unitrack_test --file $path
   Assert-LastExitCode $step
 }
+function Invoke-PsqlGitFile([string]$revisionPath, [string]$step) {
+  # Use the immutable teammate commit directly for the disposable DB run. This
+  # does not check out, copy, or modify teammate-owned files in this worktree.
+  git show $revisionPath | docker compose --project-name $projectName --file $composeFile exec -T postgres `
+    psql -X --set ON_ERROR_STOP=1 --username unitrack_local_test `
+    --dbname unitrack_test
+  Assert-LastExitCode $step
+}
 
 try {
   Write-Host 'Starting disposable PostgreSQL on 127.0.0.1:55432...'
@@ -61,6 +69,12 @@ try {
   Invoke-PsqlFile '/workspace/database/migrations/S2-02_no_double_booking.sql' 'Migration S2-02'
   Invoke-PsqlFile '/workspace/database/local-test/verify_S2-02.sql' 'Migration S2-02 verification'
 
+  Write-Host 'Applying teammate S2-09 migration from its remote-tracking commit...'
+  Invoke-PsqlGitFile 'origin/feature/s2-09-handover-nh-v2:database/migrations/C430PRJCT-40_S2-09_handover_confirmation.sql' 'Migration S2-09'
+  Invoke-PsqlGitFile 'origin/feature/s2-09-handover-nh-v2:database/migrations/C430PRJCT-40_S2-09_handover_confirmation.sql' 'Migration S2-09 idempotency'
+  Invoke-PsqlGitFile 'origin/feature/s2-09-handover-nh-v2:database/local-test/verify_C430PRJCT-40.sql' 'Migration S2-09 verification'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_S2-02.sql' 'Migration S2-02 re-verification'
+
   Write-Host 'Seeding a legacy returned loan before migration 007...'
   Invoke-PsqlFile '/workspace/database/local-test/prepare_007_legacy.sql' 'Migration 007 legacy fixture'
 
@@ -69,6 +83,14 @@ try {
 
   Write-Host 'Verifying migration 007 custody protection locally...'
   Invoke-PsqlFile '/workspace/database/local-test/verify_007.sql' 'Migration 007 verification'
+
+  Write-Host 'Applying S2-05 kit integrity and reservation resource migration locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/S2-05_kit_management.sql' 'Migration S2-05'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_S2-05.sql' 'Migration S2-05 verification'
+
+  Write-Host 'Applying and verifying the staged S2-01 reservation permissions locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/S2-01_reservation_permissions.sql' 'Migration S2-01'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_S2-01.sql' 'Migration S2-01 verification'
 
   Push-Location $repositoryRoot
   try {
@@ -80,8 +102,15 @@ try {
     $env:UNITRACK_TEST_DATABASE_URL = $databaseUrl
     try {
       Write-Host 'Running real PostgreSQL Equipment/Loans integration tests...'
+      npm test --workspace=@unitrack/equipment -- --run tests/postgres-kits.integration.test.ts
+      Assert-LastExitCode 'PostgreSQL kit integration test'
+
       npm test --workspace=@unitrack/loans -- --run tests/postgres-migrations.integration.test.ts
       Assert-LastExitCode 'PostgreSQL microservice integration test'
+
+      npm test --workspace=@unitrack/loans -- --run tests/postgres-reservations.integration.test.ts
+      Assert-LastExitCode 'PostgreSQL reservation integration test'
+
     }
     finally {
       if ($null -eq $previousTestDatabaseUrl) {
@@ -96,7 +125,7 @@ try {
     Pop-Location
   }
 
-  Write-Host 'PASS: migrations 003-007 and S2-02, plus the focused microservice integration checks, passed locally.'
+  Write-Host 'PASS: migrations 003-007, S2-01, S2-02, S2-05 and S2-09 schema integration, plus focused microservice, kit and reservation integration checks, passed locally.'
 }
 finally {
   if ($containerStarted) {
