@@ -28,8 +28,9 @@ UPDATE column, and a confirmed-only INSERT policy. It requires the real S2-09
 as `origin/feature/s2-09-handover-nh-v2`, but is not an ancestor of
 `origin/main` and its migration is absent from this checkout. The disposable
 runner streamed that committed migration directly into its local database,
-verified S2-09, then applied and verified S2-01. The staged S2-01 files remain
-staged and intact.
+verified S2-09, then applied and verified S2-01. The S2-01 migration and
+verifier are included in the already-pushed PR #28. The follow-up reservation status guard
+does not change S2-09 grants or RLS.
 
 ## S2-02: no double booking
 
@@ -73,13 +74,30 @@ chain and focused database-backed kit/reservation tests passed against the
 disposable PostgreSQL container.
 
 The C3/C4 follow-up adds a database trigger that blocks reservation status
-changes while a handover operation is not confirmed compensated, validates
-the applied-to-completed fulfillment against its matching loan and pickup
-record, and makes fulfilled status terminal. It leaves S2-09 operation writes,
-RLS, and grants unchanged. Restricted-role PostgreSQL tests cover handover,
-recovery, compensation, terminality, and the item-lock race. There is no
-production cancellation/expiry writer; future writers must take the shared
-Loans item transaction lock before locking the reservation row.
+changes while a handover operation is not confirmed compensated, blocks
+confirmed reservation invalidation when a loan row exists, validates the
+applied-to-completed fulfillment against its matching loan and pickup record,
+and makes fulfilled status terminal. It leaves S2-09 operation writes, RLS,
+and grants unchanged. Restricted-role PostgreSQL tests cover handover,
+recovery, compensation, post-compensation loan protection, confirmed-detail
+permissions, terminality, and the item-lock race. Kit reservation creation
+acquires all parent/component locks in global order, rechecks item eligibility
+and kit membership under those locks, and preserves each confirmed booking's
+component resource snapshot if the current kit membership later changes. There
+is no production cancellation/expiry writer; future writers must take the
+shared Loans item transaction lock before locking the reservation row.
+
+On 2026-11-21, the disposable local migration harness passed migrations
+003–007, S2-01, S2-02, S2-05 and S2-09 verification, plus 22 PostgreSQL
+integration cases (3 kit, 6 service migration, 5 reservation, 8 reservation
+status guard). The final unit suite passed 627 tests; its 22 database-backed
+tests were skipped in the non-database run because they were separately run
+by the local harness. Repository lint and typecheck passed. The initial
+production build stopped finalization on the Next.js security vulnerability warning. After the
+approved minimal update of `next` and `eslint-config-next` to 16.4.5, all four
+production builds passed without the warning. The browser fixture seed was
+loaded and verified in the disposable local database. See
+[the S2-01/S2-05 browser fixture and C1-C6 matrix](s2-01-s2-09-compatibility-and-browser-fixtures.md).
 
 Use `npm run typegen`, `npm run typecheck`, `npm test`, `npm run lint`, and
 `npm run build` from the repository root. Run
@@ -88,8 +106,11 @@ and PostgreSQL integration suites.
 
 ## Review boundary
 
-Current Git evidence: S2-02 is merged into `origin/main`; S2-09 has a remote
-branch but is not merged into it; no Jira connector is available. No changes
-were committed, pushed, merged, or applied to a shared database. After review,
-coordinate integration of the teammate-owned S2-09 branch and record the local
-verification results on the three Jira cards.
+Current Git evidence at this continuation: branch
+`feature/S2-01-reservation` is at `c6b730bbea9653e54f54a16f62647056228a95f2`
+before these uncommitted handoff corrections. S2-02 is merged into
+`origin/main`; S2-09 has a remote branch but is not merged into it; no Jira
+connector is available. This continuation has not committed or pushed its
+changes and has not applied anything to a shared database. Coordinate
+integration with NH and browser acceptance with SC, then record the result on
+the cards.

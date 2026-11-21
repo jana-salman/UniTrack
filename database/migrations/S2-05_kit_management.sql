@@ -148,19 +148,10 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 BEGIN
-  IF TG_OP = 'UPDATE'
-     AND OLD.is_active
-     AND OLD.tracked_item_id IS NOT NULL
-     AND (NOT NEW.is_active OR NEW.tracked_item_id IS DISTINCT FROM OLD.tracked_item_id)
-  THEN
-    DELETE FROM public.reservation_resources rr
-    USING public.reservations r
-    WHERE rr.reservation_id = r.id
-      AND r.item_id = OLD.kit_item_id
-      AND r.status = 'confirmed'
-      AND rr.resource_item_id = OLD.tracked_item_id;
-  END IF;
-
+  -- Confirmed reservations keep the resource snapshot they were created
+  -- against. Removing a component from the current kit must not release that
+  -- item for an overlapping standalone reservation while the kit is booked.
+  -- A later addition is conservatively added to active reservations below.
   IF NEW.is_active AND NEW.tracked_item_id IS NOT NULL THEN
     INSERT INTO public.reservation_resources
       (reservation_id, resource_item_id, lab_id, start_at, end_at, status)

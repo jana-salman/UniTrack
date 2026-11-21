@@ -9,7 +9,7 @@ import { createReservation, RESTRICTED_RESERVATION_MESSAGE } from "../lib/reserv
 import { LoansError } from "../lib/errors";
 
 const itemId = "11111111-1111-4111-8111-111111111111";
-const componentId = "22222222-2222-4222-8222-222222222222";
+const componentId = "00000000-0000-4000-8000-000000000111";
 const borrowerId = "33333333-3333-4333-8333-333333333333";
 const now = new Date("2026-11-21T12:00:00.000Z");
 const actor: UserIdentity = { kind: "user", sub: borrowerId, role: "student", lab_id: 9, rid: "request-1" };
@@ -71,6 +71,17 @@ describe("createReservation", () => {
     expect(mocks.connect).not.toHaveBeenCalled();
   });
 
+  it("rechecks item eligibility after acquiring its shared transaction lock", async () => {
+    equipment.getReservationItem
+      .mockResolvedValueOnce(item)
+      .mockResolvedValueOnce({ ...item, status: "checked_out" });
+    await expect(createReservation(input, actor, equipment, now))
+      .rejects.toMatchObject({ status: 409, code: "equipment_unavailable" });
+    expect(equipment.getReservationItem).toHaveBeenCalledTimes(2);
+    expect(mocks.query).toHaveBeenCalledWith("ROLLBACK");
+    expect(mocks.query).not.toHaveBeenCalledWith(expect.stringContaining("insert into public.reservations"), expect.anything());
+  });
+
   it("rejects missing equipment and items from another lab", async () => {
     equipment.getReservationItem.mockResolvedValueOnce(null);
     await expect(createReservation(input, actor, equipment, now)).rejects.toMatchObject({ status: 404 });
@@ -96,14 +107,24 @@ describe("createReservation", () => {
     expect(mocks.query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
   });
 
-  it("reserves tracked kit components with the shared lock order and preserves current status", async () => {
+  it("takes all kit item locks in global order and preserves current status", async () => {
     equipment.getReservationComponents.mockResolvedValue([{ tracked_item_id: componentId, status: "available", is_restricted: false }]);
     const result = await createReservation(input, actor, equipment, now);
     expect(mocks.query.mock.calls.filter(([sql]) => String(sql).includes("pg_advisory_xact_lock")).map(([, values]) => values)).toEqual([
-      ["loans:item:" + itemId], ["loans:item:" + componentId],
+      ["loans:item:" + componentId], ["loans:item:" + itemId],
     ]);
     expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining("insert into public.reservation_resources"), [result.id, componentId, 9, input.startAt, input.endAt]);
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("equipment_items"))).toBe(false);
+  });
+
+  it("rechecks kit membership after locking and refuses a changed snapshot", async () => {
+    equipment.getReservationComponents
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ tracked_item_id: componentId, status: "available", is_restricted: false }]);
+    await expect(createReservation(input, actor, equipment, now))
+      .rejects.toMatchObject({ status: 409, code: "kit_membership_changed" });
+    expect(mocks.query).toHaveBeenCalledWith("ROLLBACK");
+    expect(mocks.query).not.toHaveBeenCalledWith(expect.stringContaining("insert into public.reservations"), expect.anything());
   });
 
   it("rejects unauthenticated or non-student identities", async () => {

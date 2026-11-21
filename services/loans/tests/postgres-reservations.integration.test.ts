@@ -10,12 +10,13 @@ vi.mock("../lib/db", () => ({ getDatabasePool: () => {
 } }));
 import { createReservation } from "../lib/reservations/create";
 
-const expectedUrl = "postgresql://unitrack_local_test:local_test_only@127.0.0.1:55432/unitrack_test";
+const expectedUrl = "postgresql://unitrack_local_test:local_test_only@127.0.0.1:55433/unitrack_test";
 const configuredUrl = process.env.UNITRACK_TEST_DATABASE_URL;
 const localDescribe = configuredUrl ? describe.sequential : describe.skip;
 const borrower = "00000000-0000-4000-8000-000000000002";
 const kitId = "51000000-0000-4000-8000-000000000101";
-const componentId = "51000000-0000-4000-8000-000000000102";
+// Component sorts before the kit. This catches accidental parent-first lock order.
+const componentId = "41000000-0000-4000-8000-000000000102";
 const secondComponentId = "51000000-0000-4000-8000-000000000103";
 const otherItemId = "51000000-0000-4000-8000-000000000104";
 const actor: UserIdentity = { kind: "user", sub: borrower, role: "student", lab_id: 7001, rid: "postgres-reservation-test" };
@@ -115,7 +116,7 @@ localDescribe("reservation exclusion and kit-resource integration on disposable 
       .rejects.toMatchObject({ status: 409, code: "reservation_conflict" });
   });
 
-  it("synchronizes component additions and removals against active kit reservations", async () => {
+  it("keeps active kit reservation resources when components are added or later removed", async () => {
     await reserve(kitId, atDay(2), atDay(4), [{ tracked_item_id: componentId, status: "available", is_restricted: false }]);
     await pool.query(
       `insert into public.kit_components (kit_item_id, lab_id, component_name, tracked_item_id)
@@ -123,7 +124,13 @@ localDescribe("reservation exclusion and kit-resource integration on disposable 
     await expect(reserve(secondComponentId, atDay(3), atDay(5)))
       .rejects.toMatchObject({ status: 409, code: "reservation_conflict" });
     await pool.query("update public.kit_components set is_active = false where kit_item_id = $1 and tracked_item_id = $2", [kitId, secondComponentId]);
+    expect((await pool.query(
+      "select 1 from public.reservation_resources where resource_item_id = $1 and status = 'confirmed'",
+      [secondComponentId],
+    )).rowCount).toBe(1);
     await expect(reserve(secondComponentId, atDay(3), atDay(5)))
+      .rejects.toMatchObject({ status: 409, code: "reservation_conflict" });
+    await expect(reserve(secondComponentId, atDay(4), atDay(5)))
       .resolves.toMatchObject({ status: "confirmed" });
   });
 

@@ -95,6 +95,17 @@ BEGIN
       USING ERRCODE = '23514', CONSTRAINT = 'reservations_handover_status_protected';
   END IF;
 
+  -- Even after a handover operation is absent or compensated, a reservation
+  -- with a loan record cannot be cancelled, expired, or otherwise unconfirmed.
+  -- SECURITY DEFINER lets the trigger enforce this without broadening Loans
+  -- read privileges on the loans table.
+  IF OLD.status = 'confirmed'
+     AND NEW.status IN ('cancelled', 'expired', 'pending')
+     AND EXISTS (SELECT 1 FROM public.loans l WHERE l.reservation_id = OLD.id) THEN
+    RAISE EXCEPTION 'A confirmed reservation with a loan cannot be invalidated.'
+      USING ERRCODE = '23514', CONSTRAINT = 'reservations_confirmed_loan_status_protected';
+  END IF;
+
   RETURN NEW;
 END;
 $$;

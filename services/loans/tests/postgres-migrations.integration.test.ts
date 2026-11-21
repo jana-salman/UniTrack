@@ -24,7 +24,7 @@ vi.mock("../lib/db", () => ({
 import { confirmReturn } from "../lib/returns/service";
 
 const expectedDatabaseUrl =
-  "postgresql://unitrack_local_test:local_test_only@127.0.0.1:55432/unitrack_test";
+  "postgresql://unitrack_local_test:local_test_only@127.0.0.1:55433/unitrack_test";
 const configuredDatabaseUrl = process.env.UNITRACK_TEST_DATABASE_URL;
 const localDescribe = configuredDatabaseUrl ? describe.sequential : describe.skip;
 

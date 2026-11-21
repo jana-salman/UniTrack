@@ -10,7 +10,7 @@ vi.mock("../lib/db", () => ({ getDatabasePool: () => {
 } }));
 import { addKitComponent, createKit, getKit, removeKitComponent, updateKit } from "../lib/kit-queries";
 
-const expectedUrl = "postgresql://unitrack_local_test:local_test_only@127.0.0.1:55432/unitrack_test";
+const expectedUrl = "postgresql://unitrack_local_test:local_test_only@127.0.0.1:55433/unitrack_test";
 const configuredUrl = process.env.UNITRACK_TEST_DATABASE_URL;
 const localDescribe = configuredUrl ? describe.sequential : describe.skip;
 const componentOne = "53000000-0000-4000-8000-000000000101";

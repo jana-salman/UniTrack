@@ -1,12 +1,15 @@
 [CmdletBinding()]
-param()
+param([switch]$KeepDatabase)
 
 $ErrorActionPreference = 'Stop'
 $composeFile = Join-Path $PSScriptRoot 'compose.yaml'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$projectName = 'unitrack-migration-test'
-$databaseUrl = 'postgresql://unitrack_local_test:local_test_only@127.0.0.1:55432/unitrack_test'
+$projectName = 'unitrack-sprint2-verification'
+$databaseUrl = 'postgresql://unitrack_local_test:local_test_only@127.0.0.1:55433/unitrack_test'
 $containerStarted = $false
+$runSucceeded = $false
+$previousComposeTestPort = $env:UNITRACK_LOCAL_TEST_PORT
+$env:UNITRACK_LOCAL_TEST_PORT = '55433'
 
 function Assert-LastExitCode([string]$step) {
   if ($LASTEXITCODE -ne 0) {
@@ -29,7 +32,7 @@ function Invoke-PsqlGitFile([string]$revisionPath, [string]$step) {
 }
 
 try {
-  Write-Host 'Starting disposable PostgreSQL on 127.0.0.1:55432...'
+  Write-Host 'Starting isolated disposable PostgreSQL on 127.0.0.1:55433...'
   # Request cleanup before startup so a partial create/start failure cannot
   # leave this explicitly named local project behind.
   $containerStarted = $true
@@ -133,10 +136,21 @@ try {
   }
 
   Write-Host 'PASS: migrations 003-007, S2-01, S2-02, S2-05, S2-09 schema integration and C3/C4 status protection, plus focused local integration checks, passed.'
+  $runSucceeded = $true
 }
 finally {
-  if ($containerStarted) {
+  if ($containerStarted -and $KeepDatabase -and $runSucceeded) {
+    Write-Host 'Keeping the disposable PostgreSQL container running for local browser acceptance.'
+    Write-Host 'After testing, run: docker compose --project-name unitrack-sprint2-verification --file .\database\local-test\compose.yaml down --volumes --remove-orphans'
+  }
+  elseif ($containerStarted) {
     Write-Host 'Removing the disposable PostgreSQL container and temporary data...'
     docker compose --project-name $projectName --file $composeFile down --volumes --remove-orphans
+  }
+  if ($null -eq $previousComposeTestPort) {
+    Remove-Item Env:UNITRACK_LOCAL_TEST_PORT -ErrorAction SilentlyContinue
+  }
+  else {
+    $env:UNITRACK_LOCAL_TEST_PORT = $previousComposeTestPort
   }
 }

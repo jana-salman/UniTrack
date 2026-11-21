@@ -1,7 +1,7 @@
 import { Pool, type PoolClient } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
-const expectedUrl = "postgresql://unitrack_local_test:local_test_only@127.0.0.1:55432/unitrack_test";
+const expectedUrl = "postgresql://unitrack_local_test:local_test_only@127.0.0.1:55433/unitrack_test";
 const configuredUrl = process.env.UNITRACK_TEST_DATABASE_URL;
 const localDescribe = configuredUrl ? describe.sequential : describe.skip;
 const assistantId = "00000000-0000-4000-8000-000000000001";
@@ -171,6 +171,34 @@ localDescribe("reservation handover status guard on disposable PostgreSQL", () =
     }
   });
 
+  it("rejects invalidation after compensation when a loan row exists", async () => {
+    const fixture = await seed(8, "compensated");
+    await admin.query(
+      `insert into public.loans
+         (id, item_id, borrower_id, reservation_id, lab_id, borrowed_at, due_date,
+          student_confirmed_at, university_id_verified_at, university_id_verified_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $6, $6, $8)`,
+      [fixture.loanId, fixture.itemId, borrowerId, fixture.reservationId, labId, fixture.borrowedAt, fixture.endAt, assistantId],
+    );
+    await expect(loans.query("update public.reservations set status = 'cancelled' where id = $1", [fixture.reservationId]))
+      .rejects.toMatchObject({ code: "23514", constraint: "reservations_confirmed_loan_status_protected" });
+    expect((await admin.query("select status from public.reservations where id = $1", [fixture.reservationId])).rows[0].status).toBe("confirmed");
+  });
+
+  it("enforces confirmed detail immutability through restricted-role column grants", async () => {
+    const fixture = await seed(9, "compensated");
+    for (const assignment of [
+      "item_id = '53100000-0000-4000-8000-000000000099'",
+      "borrower_id = '00000000-0000-4000-8000-000000000099'",
+      "lab_id = 7002",
+      "start_at = start_at + interval '1 minute'",
+      "end_at = end_at + interval '1 minute'",
+    ]) {
+      await expect(loans.query(`update public.reservations set ${assignment} where id = $1`, [fixture.reservationId]))
+        .rejects.toMatchObject({ code: "42501" });
+    }
+  });
+
   it("keeps fulfilled reservations terminal for every later status change", async () => {
     const fixture = await seed(7, "applied");
     await runCompletion(fixture);
@@ -182,7 +210,7 @@ localDescribe("reservation handover status guard on disposable PostgreSQL", () =
   });
 
   it("serializes a future cancellation behind handover and rejects it after fulfillment", async () => {
-    const fixture = await seed(8, "applied");
+    const fixture = await seed(10, "applied");
     const handover = await loans.connect();
     const cancellation = await loans.connect();
     try {

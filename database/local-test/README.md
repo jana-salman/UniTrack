@@ -2,7 +2,8 @@
 
 This harness verifies migrations 003-007 and S2-01, S2-02, S2-05, plus the
 S2-09 schema integration, without contacting Supabase. It uses PostgreSQL 16 in
-Docker, binds only to `127.0.0.1:55432`, stores the database in
+Docker, uses the isolated `unitrack-sprint2-verification` project on
+`127.0.0.1:55433`, stores the database in
 container `tmpfs`, and removes the container when the run finishes. The fixed
 database password and records are synthetic local-test values, not secrets.
 
@@ -46,6 +47,10 @@ Expected final output:
 PASS: migrations 003-007, S2-01, S2-02, S2-05, S2-09 schema integration and C3/C4 status protection, plus focused local integration checks, passed.
 ```
 
+The saved browser acceptance database uses the separate
+`unitrack-migration-test` project on port `55432`; this test runner never
+resets or removes it. The runner sets a temporary port override for its own
+Compose process, while browser fixture commands retain the default port.
 The focused tests cover S2-02 overlapping and adjacent reservations, pending
 and cancelled rows, and different items. S2-05 verification checks least-
 privilege grants and the confirmed-only resource exclusion constraint. The
@@ -84,11 +89,12 @@ The local verifier checks S2-09's grants before S2-01 and checks preservation of
 the handover column privilege/policy from S2-01's verifier. The S2-09 application
 integration test remains on the teammate branch and is not run from this branch.
 
-If a run is interrupted, remove only this explicitly named local Compose
-project:
+If a run is interrupted, remove only the isolated verification Compose
+project. Do not substitute the `unitrack-migration-test` project used for
+preserved browser fixtures:
 
 ```powershell
-docker compose --project-name unitrack-migration-test --file .\database\local-test\compose.yaml down --volumes --remove-orphans
+docker compose --project-name unitrack-sprint2-verification --file .\database\local-test\compose.yaml down --volumes --remove-orphans
 ```
 
 Do not substitute a Supabase URL or copy real data into this harness.

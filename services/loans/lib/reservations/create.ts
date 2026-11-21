@@ -28,6 +28,7 @@ export interface ReservationResult {
 }
 
 interface ReservationInput { itemId: string; startAt: string; endAt: string }
+type ReservationActor = Extract<UserIdentity, { kind: "user" }>;
 
 function invalid(message: string): never {
   throw new LoansError(400, "invalid_reservation", message);
@@ -48,6 +49,14 @@ function parseInput(value: unknown, now: Date): ReservationInput {
   return { itemId: body.itemId, startAt: new Date(start).toISOString(), endAt: new Date(end).toISOString() };
 }
 
+function validateItemEligibility(item: ReservationEquipmentItem | null, itemId: string, actor: ReservationActor) {
+  if (!item) throw new LoansError(404, "equipment_missing", "Equipment item not found.");
+  if (item.id !== itemId) throw new LoansError(502, "equipment_unavailable", "Equipment could not be verified. Please try again.");
+  if (item.lab_id !== actor.lab_id) throw new LoansError(403, "incorrect_lab", "This item is not available in your laboratory.");
+  if (item.is_restricted) throw new LoansError(403, "restricted_equipment", RESTRICTED_RESERVATION_MESSAGE);
+  if (item.status !== "available") throw new LoansError(409, "equipment_unavailable", "This item is not currently available for reservation.");
+}
+
 export async function createReservation(
   value: unknown,
   actor: UserIdentity,
@@ -57,31 +66,38 @@ export async function createReservation(
   if (actor.kind !== "user" || actor.role !== "student") throw new LoansError(403, "forbidden", "Permission denied.");
   const input = parseInput(value, now);
 
-  const item = await equipment.getReservationItem(input.itemId);
-  if (!item) throw new LoansError(404, "equipment_missing", "Equipment item not found.");
-  if (item.lab_id !== actor.lab_id) throw new LoansError(403, "incorrect_lab", "This item is not available in your laboratory.");
-  if (item.is_restricted) throw new LoansError(403, "restricted_equipment", RESTRICTED_RESERVATION_MESSAGE);
-  if (item.status !== "available") throw new LoansError(409, "equipment_unavailable", "This item is not currently available for reservation.");
+  validateItemEligibility(await equipment.getReservationItem(input.itemId), input.itemId, actor);
+
+  // Read membership before locking so every item lock can be acquired in the
+  // shared global order. The post-lock read below confirms the membership did
+  // not change while this transaction was waiting for its locks.
+  const initialComponents = await equipment.getReservationComponents(input.itemId);
+  const initialComponentIds = [...new Set(initialComponents.map(component => component.tracked_item_id.toLowerCase()))].sort();
+  const lockIds = [...new Set([input.itemId.toLowerCase(), ...initialComponentIds])].sort();
 
   const client: PoolClient = await getDatabasePool().connect();
   let transaction = false;
   try {
     await client.query("BEGIN");
     transaction = true;
-    // The requested item is always locked first with the exact S2-09 key.
-    await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", ["loans:item:" + input.itemId.toLowerCase()]);
+    // C1 requires every multi-item transaction to take all shared locks in
+    // ascending item_id order, using the exact S2-09 key.
+    for (const id of lockIds) {
+      await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", ["loans:item:" + id]);
+    }
 
-    // Kit membership is read only after the main-item lock. Equipment kit
-    // mutation triggers take the same lock, so this component snapshot stays
-    // stable until this reservation commits.
+    // The initial API result avoids opening a transaction for ineligible items;
+    // re-read under the item lock to avoid booking against a stale status.
+    validateItemEligibility(await equipment.getReservationItem(input.itemId), input.itemId, actor);
+
     const components = await equipment.getReservationComponents(input.itemId);
+    const componentIds = [...new Set(components.map(component => component.tracked_item_id.toLowerCase()))].sort();
+    if (componentIds.length !== initialComponentIds.length || componentIds.some((id, index) => id !== initialComponentIds[index])) {
+      throw new LoansError(409, "kit_membership_changed", "The kit contents changed while the reservation was being checked. Please try again.");
+    }
     for (const component of components) {
       if (component.is_restricted) throw new LoansError(403, "restricted_equipment", RESTRICTED_RESERVATION_MESSAGE);
       if (component.status !== "available") throw new LoansError(409, "equipment_unavailable", "A tracked component of this kit is not currently available for reservation.");
-    }
-    const componentIds = [...new Set(components.map(component => component.tracked_item_id.toLowerCase()))].sort();
-    for (const id of componentIds) {
-      await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", ["loans:item:" + id]);
     }
     const resourceIds = [input.itemId, ...componentIds];
 
