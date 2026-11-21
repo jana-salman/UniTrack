@@ -10,7 +10,7 @@ it("Loans SQL accesses only owned tables and imports no web/Users/Equipment impl
   for (const file of production(path.join(root, "services/loans"))) {
     const source = readFileSync(file, "utf8");
     // SQL targets are always explicitly public-qualified in the implementation.
-    for (const match of source.matchAll(/\b(?:from|join|update|into)\s+public\.([a-z_]+)/gi)) expect(["reservations", "loans", "condition_records"]).toContain(match[1]);
+    for (const match of source.matchAll(/\b(?:from|join|update|into)\s+public\.([a-z_]+)/gi)) expect(["reservations", "reservation_resources", "loans", "condition_records"]).toContain(match[1]);
     expect(source).not.toMatch(/\b(?:from|join|update|into)\s+(?:public\.)?(?:profiles|labs|equipment_items|equipment_categories|kits|kit_components|equipment_status_history)\b/i);
     expect(source).not.toMatch(/(?:services[\\/](?:equipment|users)|apps[\\/]web|@unitrack\/(?:equipment|users|web))/);
     expect(source).not.toMatch(/console\.(?:log|error|warn)/);

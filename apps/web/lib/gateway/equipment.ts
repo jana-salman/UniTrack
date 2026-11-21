@@ -14,9 +14,9 @@ export async function forwardEquipment(request: Request, path: string): Promise<
     }
     const identity = { kind: "user" as const, sub: profile.id, role: profile.role, lab_id: profile.lab_id, rid: getRequestId(request.headers.get("X-Request-Id")) };
     const call = createServiceCaller({ baseUrl: process.env.EQUIPMENT_SERVICE_URL ?? "", secret: process.env.INTERNAL_JWT_SECRET ?? "", errorContract: EQUIPMENT_ERROR_CONTRACT });
-    const method = request.method as "GET" | "POST" | "PATCH";
+    const method = request.method as "GET" | "POST" | "PATCH" | "DELETE";
     let body: unknown;
-    if (method !== "GET") {
+    if (method === "POST" || method === "PATCH") {
       try { body = await request.json(); } catch { return Response.json({ error: "Invalid JSON body." }, { status: 400 }); }
     }
     return await call(path, identity, { method, body, idempotencyKey: request.headers.get("Idempotency-Key") ?? undefined });

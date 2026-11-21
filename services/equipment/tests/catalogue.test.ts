@@ -30,6 +30,14 @@ describe("catalogue query (S1-12)", () => {
     expect(query.mock.calls[0][1][2]).toBe(7);
   });
 
+  it("marks kits and restricted items for the reservation experience", async () => {
+    query.mockResolvedValue({ rows: [{ id: "u1", assetCode: "KIT-01", name: "Sensor kit", category: "Kits", status: "available", expectedReturn: null, isRestricted: false, isKit: true }] });
+    const [item] = await getCatalogue("", "", 7);
+    expect(item).toMatchObject({ isKit: true, isRestricted: false });
+    expect(String(query.mock.calls[0][0])).toContain('AS "isKit"');
+    expect(String(query.mock.calls[0][0])).toContain('AS "isRestricted"');
+  });
+
   it("passes the search and category as parameters, not inside the SQL text", async () => {
     query.mockResolvedValue({ rows: [] });
     await getCatalogue("drone", "Drones", 1);

@@ -1,9 +1,9 @@
 # @unitrack/contracts
 
 Shared TypeScript wire types and pure runtime validators for identity, profiles,
-Equipment catalogue/item/status responses, Loans due dates, return details and
-return outcomes. The package has no database, HTTP, framework or persistence
-dependency.
+Equipment catalogue/item/status responses, Loans due dates and confirmed
+reservations, return details and return outcomes. The package has no database,
+HTTP, framework or persistence dependency.
 
 UserIdentity has kind: "user", a nonempty subject, one of the existing profile roles, a positive safe-integer lab_id and a tracing rid. ServiceIdentity has kind: "service", sub: "gateway", role: "service", lab_id: null and rid. The gateway service identity has no user lab assignment; future consumers must explicitly allow service operations rather than treating it as a user.
 

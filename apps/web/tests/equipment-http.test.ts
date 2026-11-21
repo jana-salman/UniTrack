@@ -64,7 +64,7 @@ function browser(method = "GET", body?: unknown, key?: string) {
 describe("web gateway to real Equipment HTTP handlers with isolated DB", () => {
  it("uses verified profile identity over HTTP and preserves the catalogue shape", async () => {
   const response = await GET(browser()); expect(response.status).toBe(200);
-  expect(await response.json()).toEqual([{ id, assetCode: "EQ-1", name: "Camera", category: "Cameras", status: "Borrowed", expectedReturn: null }]);
+  expect(await response.json()).toEqual([{ id, assetCode: "EQ-1", name: "Camera", category: "Cameras", status: "Borrowed", expectedReturn: null, canReserve: false }]);
   expect(calls).toBe(1); expect(paths).toEqual(["/items"]);
   expect(mocks.query.mock.calls[0][1]).toEqual(["camera", "", 7]);
  });

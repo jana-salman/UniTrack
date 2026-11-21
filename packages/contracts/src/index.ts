@@ -48,5 +48,5 @@ export { isConditionStatus, isReturnDetails, isReturnOutcome, isReturnHistory, i
 export type { RecordedReturnCondition, ReturnHistory, ReturnProblemCondition, OwnReturnProblem, StudentReturnProblem } from "./returns.js";
 export type { ConditionStatus, ReturnLoan, ReturnLoanWire, ReturnDetails, PickupCondition, ReturnConditionInput, ConfirmReturnInput, ReturnOutcome } from "./returns.js";
 
-export { isLoanDueDate, LOANS_ERROR_CONTRACT } from "./loans.js";
-export type { LoanDueDate } from "./loans.js";
+export { isLoanDueDate, isReservation, LOANS_ERROR_CONTRACT } from "./loans.js";
+export type { LoanDueDate, Reservation } from "./loans.js";

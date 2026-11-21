@@ -22,6 +22,7 @@ export function AppNavigation({ profile }: { profile: Profile }) {
     ...(isManager
       ? [
           { href: "/manager/equipment", label: "Equipment" },
+          { href: "/manager/kits", label: "Kits" },
           { href: "/manager/categories", label: "Categories" },
           { href: "/manager/users", label: "Manage roles" },
         ]
