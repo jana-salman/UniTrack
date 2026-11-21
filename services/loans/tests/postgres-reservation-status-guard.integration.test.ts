@@ -29,7 +29,7 @@ function restrictedLoansPool() {
   return new Pool({ connectionString: configuredUrl, max: 8, options: "-c role=unitrack_loans_service" });
 }
 
-async function seed(index: number, state: string): Promise<Fixture> {
+async function seed(index: number, state: string, reservationEndAt?: string): Promise<Fixture> {
   const itemId = uuid("53100000", index);
   const reservationId = uuid("53200000", index);
   const loanId = uuid("53300000", index);
@@ -70,19 +70,19 @@ async function seed(index: number, state: string): Promise<Fixture> {
     `insert into public.reservations
        (id, item_id, borrower_id, lab_id, start_at, end_at, status, handover_operation)
      values ($1, $2, $3, $4, $5, $6, 'confirmed', $7::jsonb)`,
-    [reservationId, itemId, borrowerId, labId, startAt, endAt, JSON.stringify(operation)],
+    [reservationId, itemId, borrowerId, labId, startAt, reservationEndAt ?? endAt, JSON.stringify(operation)],
   );
   return fixture;
 }
 
-async function completeHandover(client: PoolClient, fixture: Fixture) {
+async function completeHandover(client: PoolClient, fixture: Fixture, loanDueDate = fixture.endAt) {
   const op = { ...fixture.operation, state: "completed" };
   await client.query(
     `insert into public.loans
        (id, item_id, borrower_id, reservation_id, lab_id, borrowed_at, due_date,
         student_confirmed_at, university_id_verified_at, university_id_verified_by)
      values ($1, $2, $3, $4, $5, $6, $7, $6, $6, $8)`,
-    [fixture.loanId, fixture.itemId, borrowerId, fixture.reservationId, labId, fixture.borrowedAt, fixture.endAt, assistantId],
+    [fixture.loanId, fixture.itemId, borrowerId, fixture.reservationId, labId, fixture.borrowedAt, loanDueDate, assistantId],
   );
   await client.query(
     `insert into public.condition_records
@@ -154,6 +154,40 @@ localDescribe("reservation handover status guard on disposable PostgreSQL", () =
       const result = await admin.query("select status, handover_operation ->> 'state' as state from public.reservations where id = $1", [fixture.reservationId]);
       expect(result.rows[0]).toEqual({ status: "fulfilled", state: "completed" });
     });
+
+  it("allows legitimate handover when reservation end_at has PostgreSQL sub-millisecond precision", async () => {
+    const endAt = new Date(Date.now() + 86_400_000);
+    const preciseEndAt = endAt.toISOString().replace(/Z$/, "456Z");
+    const fixture = await seed(11, "applied", preciseEndAt);
+    await runCompletion(fixture);
+    const result = await admin.query(
+      "select status, end_at::text as reservation_end_at, (handover_operation #>> '{result,dueDate}') as handover_due_date from public.reservations where id = $1",
+      [fixture.reservationId],
+    );
+    expect(result.rows[0].status).toBe("fulfilled");
+    expect(new Date(result.rows[0].handover_due_date).getTime()).toBe(new Date(result.rows[0].reservation_end_at).getTime());
+    expect(result.rows[0].reservation_end_at).toMatch(/\.\d{6}/);
+  });
+
+  it("rejects handover completion when loan due_date differs by a full millisecond", async () => {
+    const endAt = new Date(Date.now() + 86_400_000);
+    const preciseEndAt = endAt.toISOString().replace(/Z$/, "456Z");
+    const fixture = await seed(12, "applied", preciseEndAt);
+    const client = await loans.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("select pg_advisory_xact_lock(hashtextextended('loans:item:' || $1::uuid::text, 0))", [fixture.itemId]);
+      await client.query("select id from public.reservations where id = $1 for update", [fixture.reservationId]);
+      await expect(completeHandover(client, fixture, new Date(fixture.endAt.getTime() + 1)))
+        .rejects.toMatchObject({ code: "23514", constraint: "reservations_fulfillment_requires_completed_handover" });
+      await client.query("ROLLBACK");
+      expect((await admin.query("select status from public.reservations where id = $1", [fixture.reservationId])).rows[0].status)
+        .toBe("confirmed");
+      expect((await admin.query("select 1 from public.loans where id = $1", [fixture.loanId])).rowCount).toBe(0);
+    } finally {
+      client.release();
+    }
+  });
 
   it("allows compensation state updates, blocks cancellation until compensation is confirmed, then permits it", async () => {
     const fixture = await seed(6, "applied");

@@ -68,7 +68,10 @@ BEGIN
             AND l.item_id = OLD.item_id
             AND l.borrower_id = OLD.borrower_id
             AND l.lab_id = OLD.lab_id
-            AND l.due_date = OLD.end_at
+            -- S2-09 round-trips timestamps through JavaScript Date (ms),
+            -- while PostgreSQL timestamptz retains microseconds.
+            AND date_trunc('milliseconds', l.due_date)
+                = date_trunc('milliseconds', OLD.end_at)
             AND l.student_confirmed_at IS NOT NULL
             AND l.university_id_verified_at IS NOT NULL
             AND l.university_id_verified_by::TEXT = (NEW.handover_operation ->> 'idVerifiedBy')
