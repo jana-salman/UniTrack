@@ -1,73 +1,40 @@
-import { roleLabel } from "@/lib/auth/model";
-import { requirePageProfile } from "@/lib/auth/authorization";
+import Link from "next/link";
 import { Suspense } from "react";
+import { requirePageProfile } from "@/lib/auth/authorization";
+import { Icon } from "@/components/icon";
+import { PageHeading } from "@/components/page-heading";
+import { PageStatus } from "@/components/page-status";
+import { workspaceLinks } from "@/components/workspace-links";
 import ReturnProblems from "./return-problems";
 
-const roleContent = {
-  student: {
-    title: "My equipment activity",
-    description: "Review your reservations, loans, and upcoming due dates.",
-  },
-  lab_assistant: {
-    title: "Lab operations",
-    description: "Support equipment checkouts, returns, and inspections for your lab.",
-  },
-  professor: {
-    title: "Course equipment",
-    description: "Plan equipment needs and review availability for your courses.",
-  },
-  lab_manager: {
-    title: "Laboratory management",
-    description: "Manage lab access, user roles, equipment, and operational oversight.",
-  },
-} as const;
+export const instant = false;
 
-async function DashboardContent()  {
+async function DashboardContent() {
   const profile = await requirePageProfile();
-  const content = roleContent[profile.role];
+  const links = workspaceLinks(profile.role).filter((link) => link.href !== "/dashboard");
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
-      <section className="mb-10 max-w-3xl">
-        <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">
-          {roleLabel(profile.role)} workspace
-        </p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950 sm:text-5xl">
-          Welcome, {profile.full_name}
-        </h1>
-        <p className="mt-3 leading-7 text-slate-600">
-          You are signed in to laboratory {profile.lab_id}. Your permissions are
-          loaded from your active university profile.
-        </p>
-      </section>
-
-      <section className="grid gap-5 md:grid-cols-2" aria-label="Dashboard summary">
-        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <span className="block size-3 rounded-full bg-emerald-500 ring-4 ring-emerald-100" aria-hidden="true" />
-          <h2 className="mt-5 text-lg font-semibold text-slate-950">{content.title}</h2>
-          <p className="mt-2 leading-7 text-slate-600">{content.description}</p>
-        </article>
-        <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <span className="block size-3 rounded-full bg-blue-600 ring-4 ring-blue-100" aria-hidden="true" />
-          <h2 className="mt-5 text-lg font-semibold text-slate-950">Account status</h2>
-          <p className="mt-2 leading-7 text-slate-600">
-            Your UniTrack profile is active and ready to use.
-          </p>
-        </article>
-      </section>
-      {profile.role === "student" && <ReturnProblems key={profile.id + ":" + profile.lab_id} />}
-    </main>
+    <>
+      <PageHeading title={`Welcome, ${profile.full_name}`} section="Dashboard" context={`Laboratory ${profile.lab_id}`} />
+      <ul className="dashboard-links" aria-label="Workspace tasks">
+        {links.map(({ href, icon, label, description }) => (
+          <li key={href}>
+            <Link className="panel dashboard-link" href={href}>
+              <Icon name={icon} />
+              <div><strong>{label}</strong><span>{description}</span></div>
+              <Icon name="arrow" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+      {profile.role === "student" && <ReturnProblems key={`${profile.id}:${profile.lab_id}`} />}
+    </>
   );
 }
+
 export default function DashboardPage() {
   return (
-    <Suspense
-      fallback={
-        <main className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
-          <p className="text-slate-600">Loading your workspace…</p>
-        </main>
-      }
-    >
+    <Suspense fallback={<PageStatus>Loading your workspace…</PageStatus>}>
       <DashboardContent />
     </Suspense>
   );

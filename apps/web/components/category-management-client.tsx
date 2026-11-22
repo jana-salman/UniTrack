@@ -1,5 +1,7 @@
 "use client";
 
+import { PageHeading } from "@/components/page-heading";
+
 import { useEffect, useState, type FormEvent } from "react";
 import { validateCreateCategoryInput } from "@/lib/category-validation";
 
@@ -139,16 +141,8 @@ export default function CategoryManagementClient() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold text-slate-950">
-          Manage Equipment Categories
-        </h1>
-
-        <p className="mt-2 text-slate-600">
-          View existing equipment categories and create new ones.
-        </p>
-      </header>
+    <div>
+      <PageHeading title="Equipment categories" section="Categories" />
 
       {/* Existing categories */}
       <section className="mb-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -204,7 +198,7 @@ export default function CategoryManagementClient() {
               onBlur={() => setShowValidation(true)}
               required
               maxLength={100}
-              className="mt-2 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-4 text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+              className="mt-2 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-4 text-slate-900 outline-none focus:border-aub-600 focus:ring-2 focus:ring-aub-100"
             />
 
             <p className="mt-1 text-xs text-slate-500">
@@ -236,7 +230,7 @@ export default function CategoryManagementClient() {
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               rows={3}
-              className="mt-2 block w-full rounded-lg border border-slate-300 bg-white p-4 text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+              className="mt-2 block w-full rounded-lg border border-slate-300 bg-white p-4 text-slate-900 outline-none focus:border-aub-600 focus:ring-2 focus:ring-aub-100"
             />
           </div>
 
@@ -255,12 +249,12 @@ export default function CategoryManagementClient() {
           <button
             type="submit"
             disabled={saving}
-            className="mt-6 min-h-11 rounded-lg bg-blue-600 px-5 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-6 min-h-11 rounded-lg bg-aub-600 px-5 font-semibold text-white hover:bg-aub-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? "Creating..." : "Create Category"}
           </button>
         </form>
       </section>
-    </main>
+    </div>
   );
 }

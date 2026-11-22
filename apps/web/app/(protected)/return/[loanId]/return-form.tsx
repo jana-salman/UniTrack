@@ -164,7 +164,7 @@ export default function ReturnForm({
 
         <button
           type="submit"
-          className="min-h-11 rounded-lg bg-blue-700 px-5 py-3 font-semibold text-white disabled:opacity-50"
+          className="min-h-11 rounded-lg bg-aub-700 px-5 py-3 font-semibold text-white disabled:opacity-50"
         >
           {submitting ? "Saving return..." : "Confirm return"}
         </button>

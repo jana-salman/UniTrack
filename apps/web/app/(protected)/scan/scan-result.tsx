@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { InterruptedHandovers } from "@/components/interrupted-handovers";
 import EquipmentQrScanner from "@/components/equipment/equipment-qr-scanner";
 
 type PickupEligibility = "upcoming" | "eligible" | "expired";
@@ -28,6 +29,7 @@ type PickupMatch = {
 
 type ScanResultProps = {
   canViewReservations: boolean;
+  initialItemId?: string;
 };
 
 const eligibilityLabels: Record<PickupEligibility, string> = {
@@ -46,16 +48,21 @@ const handoverEquipmentStatuses = new Set(["available", "reserved"]);
 
 export default function ScanResult({
   canViewReservations,
+  initialItemId,
 }: ScanResultProps) {
   const [scan, setScan] = useState<{
     itemId: string;
-  } | null>(null);
+  } | null>(() => canViewReservations && initialItemId ? { itemId: initialItemId } : null);
 
   const [match, setMatch] = useState<PickupMatch | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => Boolean(canViewReservations && initialItemId));
   const [error, setError] = useState<string | null>(null);
+  const resultHeading = useRef<HTMLHeadingElement>(null);
 
   const scannedId = scan?.itemId ?? null;
+  useEffect(() => {
+    if (scannedId) resultHeading.current?.focus();
+  }, [scannedId]);
 
   function handleScan(itemId: string) {
     setMatch(null);
@@ -127,13 +134,11 @@ export default function ScanResult({
 
   return (
     <section className="space-y-6">
-      <EquipmentQrScanner onScan={handleScan} />
-
       {scannedId && (
         <div className="max-w-lg space-y-4 rounded-xl border border-slate-200 bg-white p-5">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">
-              Equipment QR Code Scanned
+            <h2 ref={resultHeading} tabIndex={-1} className="text-lg font-semibold text-slate-900">
+              Selected equipment
             </h2>
 
             <p className="mt-2 text-sm text-slate-600">
@@ -190,6 +195,8 @@ export default function ScanResult({
                 </p>
               </div>
 
+              <InterruptedHandovers itemId={match.equipment.id} />
+
               {match.activeLoan && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <h3 className="font-semibold text-amber-900">
@@ -204,8 +211,8 @@ export default function ScanResult({
                   </p>
 
                   <Link
-                    href={`/return/${match.activeLoan.id}`}
-                    className="mt-3 inline-block rounded-lg bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800"
+                    href={`/return/${encodeURIComponent(match.activeLoan.id)}`}
+                    className="action-primary mt-3 text-sm"
                   >
                     View Return
                   </Link>
@@ -264,7 +271,7 @@ export default function ScanResult({
                         {canProceedToHandover ? (
                           <Link
                             href={`/handover/${encodeURIComponent(reservation.id)}`}
-                            className="mt-3 inline-block rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800"
+                            className="action-primary mt-3 text-sm"
                           >
                             Proceed to Handover
                           </Link>
@@ -294,6 +301,7 @@ export default function ScanResult({
           )}
         </div>
       )}
+      <EquipmentQrScanner onScan={handleScan} />
     </section>
   );
 }

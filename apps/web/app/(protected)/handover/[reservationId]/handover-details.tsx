@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { HANDOVER_CONDITION_LABELS, isHandoverOutcome, type HandoverOutcome, type InterruptedHandover } from "@unitrack/contracts";
+import { HANDOVER_CONDITION_LABELS, isHandoverOutcome, type HandoverOutcome } from "@unitrack/contracts";
+import { InterruptedHandovers } from "@/components/interrupted-handovers";
 import StatusBadge from "@/components/StatusBadge";
-import { isHandoverView, isInterruptedList, statusLabel, type HandoverView } from "@/lib/handover-view";
+import { isHandoverView, statusLabel, type HandoverView } from "@/lib/handover-view";
 import HandoverForm from "./handover-form";
 
 type LoadState =
@@ -30,7 +31,6 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [reload, setReload] = useState(0);
   const [outcome, setOutcome] = useState<HandoverOutcome | null>(null);
-  const [interrupted, setInterrupted] = useState<InterruptedHandover[]>([]);
   const [recovering, setRecovering] = useState(false);
   const [recoveryError, setRecoveryError] = useState("");
   // Message from the last unsuccessful submission, kept when an unresolved
@@ -49,12 +49,6 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
       } catch (error) {
         if (!controller.signal.aborted) setState({ status: "error", message: error instanceof Error ? error.message : "Unable to load the reservation." });
       }
-      // Unfinished handovers in this lab, so none depends on a browser staying open.
-      try {
-        const response = await fetch("/api/handover", { cache: "no-store", signal: controller.signal });
-        const body: unknown = response.ok ? await response.json() : [];
-        if (!controller.signal.aborted) setInterrupted(isInterruptedList(body) ? body : []);
-      } catch { /* The list is a convenience; the reservation page still works. */ }
     }
     void load();
     return () => controller.abort();
@@ -75,15 +69,14 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
     }
   }
 
-  if (state.status === "loading") return <p role="status">Loading reservation...</p>;
-  if (state.status === "error") return <p role="alert" className="text-red-700">{state.message}</p>;
+  if (state.status === "loading") return <p role="status" className="status-panel">Loading reservation…</p>;
+  if (state.status === "error") return <p role="alert" className="notice-panel">{state.message}</p>;
 
   const { reservation, handover, equipment, components, borrower, partialData, pending, checklistVersion } = state.data;
   const equipmentName = equipment?.name ?? "Equipment name unavailable";
   const componentNames = Object.fromEntries((components ?? []).map(component => [component.id, component.name]));
   // Loans only reports a completed handover after Equipment confirmed checkout.
   const currentStatus = equipment ? statusLabel(equipment.status) : outcome ? statusLabel(outcome.status) : "Status unavailable";
-  const others = interrupted.filter(row => row.reservationId.toLowerCase() !== reservation.id.toLowerCase());
 
   return (
     <section className="max-w-3xl space-y-6">
@@ -167,20 +160,7 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
         />
       )}
 
-      {others.length > 0 && (
-        <section aria-labelledby="lab-interrupted" className="rounded-xl border border-slate-200 bg-white p-5">
-          <h2 id="lab-interrupted" className="text-lg font-semibold text-slate-950">Unfinished handovers in your lab</h2>
-          <ul className="mt-2 space-y-1">
-            {others.map(row => (
-              <li key={row.reservationId}>
-                <a className="text-blue-700 underline" href={`/handover/${encodeURIComponent(row.reservationId)}`}>
-                  Reservation {row.reservationId.slice(0, 8)}… started {formatDate(row.startedAt)}
-                </a>{row.recoverableByYou ? "" : " (started by another assistant)"}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <InterruptedHandovers excludeReservationId={reservation.id} refreshKey={reload} />
     </section>
   );
 }

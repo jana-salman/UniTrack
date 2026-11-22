@@ -200,7 +200,7 @@ export default function HandoverForm({ reservationId, equipmentName, components,
           </label>
         </div>
 
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+        <div className="rounded-lg border border-aub-200 bg-aub-50 p-4">
           <h2 className="font-semibold text-slate-950">Student confirmation</h2>
           <p className="mt-1 text-sm text-slate-700">Hand this screen to {borrowerName ?? "the student"} to read the checklist and confirm.</p>
           {missingRows.length > 0 && (
@@ -235,7 +235,7 @@ export default function HandoverForm({ reservationId, equipmentName, components,
           </label>
         </div>
 
-        <button type="submit" className="min-h-11 rounded-lg bg-blue-700 px-5 py-3 font-semibold text-white disabled:opacity-50">
+        <button type="submit" className="min-h-11 rounded-lg bg-aub-700 px-5 py-3 font-semibold text-white disabled:opacity-50">
           {submitting ? "Completing handover..." : "Complete handover"}
         </button>
       </fieldset>
@@ -251,7 +251,7 @@ export default function HandoverForm({ reservationId, equipmentName, components,
             type="button"
             onClick={() => void send(retryPayload)}
             disabled={submitting}
-            className="mt-3 min-h-11 rounded-lg border border-blue-700 bg-white px-5 py-3 font-semibold text-blue-700 disabled:opacity-50"
+            className="mt-3 min-h-11 rounded-lg border border-aub-700 bg-white px-5 py-3 font-semibold text-aub-700 disabled:opacity-50"
           >
             Retry the same handover
           </button>

@@ -71,8 +71,11 @@ it("TC-4.1: checks all five components, persists an on-time return/history and d
   expect(fixture.db.state.records.map(row => row[2])).toEqual([null, ...components.map(c => c.id)]);
   expect(fixture.db.state.records.every(row => row[4] === "good" && row[5] === null)).toBe(true);
   expect(host.textContent).toContain("Recorded as on time.");
-  await act(async () => root.render(<ReturnDetails key="reload" loanId={loanId} />));
+  const viewHistory = [...host.querySelectorAll("button")].find(button => button.textContent === "View return history");
+  expect(viewHistory).toBeDefined();
+  await act(async () => viewHistory!.click());
   await waitForUi(() => expect(host.textContent).toContain("Already returned"));
+  expect(host.querySelector('[aria-labelledby="return-history-heading"]')).not.toBeNull();
   expect(host.querySelector("form")).toBeNull(); expect(fixture.posts).toHaveLength(1); expect(fixture.history).toHaveLength(1);
 });
 

@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/actions", () => ({ logout: vi.fn() }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/catalogue" }));
 
 import { AppNavigation } from "@/components/app-navigation";
 import {
@@ -36,6 +37,9 @@ describe("roles and navigation", () => {
 
     expect(markup).toContain('href="/dashboard"');
     expect(markup).toContain(roleLabel(role));
+    expect(markup).toContain("Laboratory 7");
+    expect(markup).toMatch(/href="\/catalogue" aria-current="page"|aria-current="page" href="\/catalogue"/);
+    expect(markup.match(/aria-label="Primary navigation"/g)).toHaveLength(1);
 
     expect(markup.includes('href="/manager/users"')).toBe(
       role === "lab_manager"

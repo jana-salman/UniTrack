@@ -48,7 +48,7 @@ export function RoleEditor({ profile }: { profile: Profile }) {
         Role for {profile.full_name}
       </label>
       <select
-        className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-slate-900 outline-none focus:border-blue-600 focus:ring-3 focus:ring-blue-100"
+        className="min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-slate-900 outline-none focus:border-aub-600 focus:ring-3 focus:ring-aub-100"
         id={`role-${profile.id}`}
         onChange={(event) => setRole(event.target.value as ProfileRole)}
         value={role}

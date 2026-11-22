@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import EquipmentQrLabel from "./equipment-qr-label";
 
@@ -14,6 +15,7 @@ type EquipmentItem = {
 
 type EquipmentLookupClientProps = {
   canReplaceQrLabel: boolean;
+  canMatchPickup: boolean;
 };
 
 function isEquipmentItem(data: unknown): data is EquipmentItem {
@@ -36,6 +38,7 @@ function isEquipmentItem(data: unknown): data is EquipmentItem {
 
 export default function EquipmentLookupClient({
   canReplaceQrLabel,
+  canMatchPickup,
 }: EquipmentLookupClientProps) {
   const [identifier, setIdentifier] = useState("");
   const [item, setItem] = useState<EquipmentItem | null>(null);
@@ -51,7 +54,7 @@ export default function EquipmentLookupClient({
     setError("");
 
     if (!search || search.length > 100) {
-      setError("Enter a valid ID or serial number.");
+      setError("Enter an equipment ID, asset code, or serial number.");
       return;
     }
 
@@ -95,7 +98,7 @@ export default function EquipmentLookupClient({
 
   return (
     <section className="space-y-6">
-      <form onSubmit={handleSearch} className="space-y-4">
+      <form onSubmit={handleSearch} className="panel space-y-4 p-4 sm:p-5">
         <label
           htmlFor="equipment-identifier"
           className="block font-semibold text-slate-900"
@@ -116,7 +119,7 @@ export default function EquipmentLookupClient({
         <button
           type="submit"
           disabled={loading}
-          className="rounded-lg bg-blue-700 px-5 py-3 font-semibold text-white disabled:opacity-50"
+          className="rounded-lg bg-aub-700 px-5 py-3 font-semibold text-white disabled:opacity-50"
         >
           {loading ? "Searching..." : "Find Equipment"}
         </button>
@@ -156,6 +159,12 @@ export default function EquipmentLookupClient({
               <strong>Equipment UUID:</strong> {item.id}
             </p>
           </div>
+
+          {canMatchPickup && (
+            <Link className="action-primary" href={`/scan?itemId=${encodeURIComponent(item.id)}`}>
+              Check pickup or return
+            </Link>
+          )}
 
           {canReplaceQrLabel && (
             <div className="space-y-3">

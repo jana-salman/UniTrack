@@ -98,16 +98,7 @@ export default function EquipmentQrLabel({
     <div>
       <div
         ref={labelRef}
-        className="qr-label"
-        style={{
-          width: "260px",
-          padding: "16px",
-          border: "1px solid #d1d5db",
-          borderRadius: "8px",
-          backgroundColor: "#ffffff",
-          color: "#111827",
-          textAlign: "center",
-        }}
+        className="panel qr-label"
       >
         <h3
           style={{
@@ -152,15 +143,7 @@ export default function EquipmentQrLabel({
       <button
         type="button"
         onClick={handlePrint}
-        style={{
-          marginTop: "12px",
-          padding: "10px 16px",
-          borderRadius: "6px",
-          backgroundColor: "#111827",
-          color: "#ffffff",
-          border: "none",
-          cursor: "pointer",
-        }}
+        className="action-secondary mt-3"
       >
         Print QR Label
       </button>

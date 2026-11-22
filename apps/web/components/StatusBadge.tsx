@@ -3,7 +3,7 @@
 // SC: the status names must match exactly what the database stores.
 const COLOURS: Record<string, string> = {
   Available: "bg-green-100 text-green-800",
-  Reserved: "bg-indigo-100 text-indigo-800",
+  Reserved: "bg-blue-100 text-blue-900",
   Borrowed: "bg-amber-100 text-amber-800",
   "Inspection Required": "bg-red-100 text-red-800",
   "Under Repair": "bg-red-100 text-red-800",
@@ -15,7 +15,7 @@ export default function StatusBadge({ status }: { status: string }) {
   const colour = COLOURS[status] ?? "bg-gray-200 text-gray-700";
   return (
     <span
-      className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-sm font-semibold ${colour}`}
+      className={`equipment-status ${colour}`}
     >
       {status}
     </span>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { isReservation } from "@unitrack/contracts";
 
 function localDate(date: Date) {
@@ -14,11 +14,22 @@ export default function ReservationForm({ itemId, itemName }: { itemId: string; 
   const [error, setError] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [saving, setSaving] = useState(false);
+  const reserveButton = useRef<HTMLButtonElement>(null);
+  const startField = useRef<HTMLInputElement>(null);
+  const restoreFocus = useRef(false);
   const today = new Date();
   const maximumStart = new Date(today);
   maximumStart.setDate(maximumStart.getDate() + 14);
   const maximumEnd = new Date(today);
   maximumEnd.setDate(maximumEnd.getDate() + 20);
+
+  useEffect(() => {
+    if (open) startField.current?.focus();
+    else if (restoreFocus.current) {
+      reserveButton.current?.focus();
+      restoreFocus.current = false;
+    }
+  }, [open]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -55,20 +66,20 @@ export default function ReservationForm({ itemId, itemName }: { itemId: string; 
   }
 
   return (
-    <div className="mt-4">
+    <div className="reserve-dates mt-3">
       {confirmation && <p role="status" className="mb-2 text-sm font-medium text-green-800">{confirmation}</p>}
-      {!open ? <button type="button" onClick={() => { setOpen(true); setError(""); }} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800">Reserve dates</button> : (
-        <form onSubmit={submit} className="grid gap-3 rounded-lg bg-slate-50 p-3 sm:grid-cols-2" aria-label={`Reserve ${itemName}`}>
+      {!open ? <button ref={reserveButton} type="button" onClick={() => { restoreFocus.current = true; setOpen(true); setError(""); }} className="action-secondary text-sm">Reserve dates</button> : (
+        <form onSubmit={submit} className="reservation-fields grid gap-3 rounded-lg bg-slate-50 p-3" aria-label={`Reserve ${itemName}`}>
           <label className="text-sm font-medium text-slate-800">Start date
-            <input required type="date" min={localDate(today)} max={localDate(maximumStart)} value={startDate} onChange={event => { setStartDate(event.target.value); if (endDate < event.target.value) setEndDate(event.target.value); }} className="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 px-3" />
+            <input ref={startField} required type="date" min={localDate(today)} max={localDate(maximumStart)} value={startDate} onChange={event => { setStartDate(event.target.value); if (endDate < event.target.value) setEndDate(event.target.value); }} className="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 px-3" />
           </label>
           <label className="text-sm font-medium text-slate-800">End date
             <input required type="date" min={startDate || localDate(today)} max={startDate ? (() => { const date = new Date(`${startDate}T00:00:00`); date.setDate(date.getDate() + 6); return localDate(date); })() : localDate(maximumEnd)} value={endDate} onChange={event => setEndDate(event.target.value)} className="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 px-3" />
           </label>
-          {error && <p role="alert" className="text-sm text-red-700 sm:col-span-2">{error}</p>}
-          <div className="flex gap-2 sm:col-span-2">
-            <button type="submit" disabled={saving || !startDate || !endDate} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Reserving…" : "Confirm reservation"}</button>
-            <button type="button" onClick={() => setOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancel</button>
+          {error && <p role="alert" className="col-span-full text-sm text-red-700">{error}</p>}
+          <div className="col-span-full flex flex-wrap gap-2">
+            <button type="submit" disabled={saving || !startDate || !endDate} className="action-primary text-sm">{saving ? "Reserving…" : "Confirm reservation"}</button>
+            <button type="button" onClick={() => setOpen(false)} className="action-secondary text-sm">Cancel</button>
           </div>
         </form>
       )}

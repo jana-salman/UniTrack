@@ -15,6 +15,7 @@ interface ReturnActionsProps {
   pickupConditions: PickupCondition[];
   equipmentName: string;
   componentNames: Record<string, string>;
+  onViewHistory: () => void;
 }
 
 export default function ReturnActions({
@@ -22,6 +23,7 @@ export default function ReturnActions({
   pickupConditions,
   equipmentName,
   componentNames,
+  onViewHistory,
 }: ReturnActionsProps) {
   const [result, setResult] = useState<ReturnOutcome | null>(null);
   const [blocked, setBlocked] = useState(false);
@@ -98,6 +100,7 @@ export default function ReturnActions({
         <p className="mt-2 text-slate-700">
           {result.isLate ? "Recorded as late." : "Recorded as on time."}
         </p>
+        <button className="action-secondary mt-4" type="button" onClick={onViewHistory}>View return history</button>
       </section>
     );
   }

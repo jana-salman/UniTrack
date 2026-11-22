@@ -1,32 +1,28 @@
-
+import Link from "next/link";
 import { requirePageProfile } from "@/lib/auth/authorization";
+import { isValidEquipmentQrPayload } from "@/lib/qr/qr-payload";
+import { PageHeading } from "@/components/page-heading";
 import ScanResult from "./scan-result";
 
-export default async function ScanPage() {
-  const profile = await requirePageProfile([
-    "lab_manager",
-    "lab_assistant",
-    "professor",
-  ]);
+export const instant = false;
+
+export default async function ScanPage({ searchParams }: PageProps<"/scan">) {
+  const profile = await requirePageProfile(["lab_manager", "lab_assistant", "professor"]);
+  const canViewReservations = profile.role === "lab_assistant";
+  const { itemId } = await searchParams;
+  const initialItemId = canViewReservations && typeof itemId === "string" && isValidEquipmentQrPayload(itemId)
+    ? itemId.trim()
+    : undefined;
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
-      <section className="mb-8 max-w-3xl">
-        <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">
-          Equipment Management
-        </p>
-
-        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950 sm:text-5xl">
-          Scan Equipment
-        </h1>
-
-        <p className="mt-3 leading-7 text-slate-600">
-          Scan an equipment QR code to identify an item using
-          its unique equipment ID.
-        </p>
-      </section>
-
-      <ScanResult canViewReservations={profile.role === "lab_assistant"} />
-    </main>
+    <>
+      <PageHeading
+        title="Scan equipment"
+        section="Scan"
+        description={canViewReservations ? "Find an eligible pickup or active loan using the equipment’s QR code or UUID." : undefined}
+      />
+      <ScanResult key={initialItemId} canViewReservations={canViewReservations} initialItemId={initialItemId} />
+      <Link href="/equipment/lookup" className="action-secondary mt-5">Find equipment by asset code</Link>
+    </>
   );
 }

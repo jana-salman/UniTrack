@@ -5,6 +5,8 @@ import StatusBadge from "@/components/StatusBadge";
 import { useRouter } from "next/navigation";
 import { isCatalogueItem, type CatalogueItem } from "@unitrack/contracts";
 import ReservationForm from "@/components/ReservationForm";
+import { Icon } from "@/components/icon";
+import { PageStatus } from "@/components/page-status";
 
 const REFRESH_MS = 30_000; // refresh every 30 s, so changes show within 1 minute
 
@@ -19,38 +21,43 @@ export default function CatalogueClient() {
   const [loading, setLoading] = useState(true);
 
   // Load the items. Runs when the search or category changes, and every 30 s.
-  const loadItems = useCallback(async () => {
+  const loadItems = useCallback(async (signal: AbortSignal) => {
     try {
       const params = new URLSearchParams({ search, category });
-      const res = await fetch(`/api/items?${params}`);
+      const res = await fetch(`/api/items?${params}`, { signal });
+      if (signal.aborted) return;
       if (res.status === 401) {
-           router.replace("/login"); // session ended
+        router.replace("/login"); // session ended
         return;
       }
       if (!res.ok) throw new Error("bad response");
       const data: unknown = await res.json();
       if (!Array.isArray(data) || !data.every(isCatalogueItem)) throw new Error("invalid catalogue response");
+      if (signal.aborted) return;
       setItems(data);
       setPartial(res.headers.has("X-UniTrack-Partial-Data"));
       setError("");
     } catch {
+      if (signal.aborted) return;
       setError("Could not load the catalogue. Please try again.");
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, [search, category, router]);
 
   useEffect(() => {
-    const t = setTimeout(loadItems, 300); // small delay while typing
-    const timer = setInterval(loadItems, REFRESH_MS);
+    const controller = new AbortController();
+    const refresh = () => void loadItems(controller.signal);
+    const t = setTimeout(refresh, 300); // small delay while typing
+    const timer = setInterval(refresh, REFRESH_MS);
     return () => {
+      controller.abort();
       clearTimeout(t);
       clearInterval(timer);
     };
   }, [loadItems]);
 
-  // Category list. SN builds GET /api/categories. Until it exists, we use
-  // the categories found in the items.
+  // If categories are unavailable, use the categories found in the lab’s items.
   useEffect(() => {
     (async () => {
       try {
@@ -59,9 +66,9 @@ export default function CatalogueClient() {
         const data: { name: string }[] = await res.json();
         setCategories(data.map((c) => c.name));
       } catch {
-        const res = await fetch("/api/items");
-        if (res.ok) {
-          const all: unknown = await res.json();
+        const res = await fetch("/api/items").catch(() => null);
+        if (res?.ok) {
+          const all: unknown = await res.json().catch(() => null);
           if (Array.isArray(all) && all.every(isCatalogueItem)) {
             setCategories([...new Set(all.map((i) => i.category))].sort());
           }
@@ -70,77 +77,68 @@ export default function CatalogueClient() {
     })();
   }, []);
 
-    const field =
-    "min-h-11 rounded-lg border border-gray-300 bg-white px-3 text-base text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600";
-
   return (
-    <div>
-      <h1 className="mb-4 text-2xl font-semibold text-gray-900">
-        Equipment catalogue
-      </h1>
-
-      <div className="mb-4 flex flex-wrap gap-2">
-        <input
-          type="search"
-          placeholder="Search by name"
-          aria-label="Search by name"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className={`${field} flex-1 basis-44`}
-        />
+    <>
+      <div className="catalogue-filters">
+        <label className="catalogue-search">
+          <span className="sr-only">Search equipment by name or asset code</span>
+          <Icon name="search" />
+          <input
+            type="search"
+            placeholder="Search by name or asset code"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
         <select
           aria-label="Filter by category"
           value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          className={`${field} flex-1 basis-36`}
+          onChange={(event) => setCategory(event.target.value)}
         >
           <option value="">All categories</option>
-          {categories.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
+          {categories.map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
       </div>
 
-      {partial && <p role="status" className="text-gray-700">Some return dates are unavailable. Equipment details are still shown.</p>}
-      {error && (
-        <p role="alert" className="text-red-600">
-          {error}
-        </p>
-      )}
-      {loading && !error && <p className="text-gray-700">Loading…</p>}
-      {!loading && !error && items.length === 0 && (
-        <p className="text-gray-700">No equipment found.</p>
-      )}
+      {partial && !error && <PageStatus>Some return dates are unavailable.</PageStatus>}
+      {error && <p role="alert" className="notice-panel">{error}</p>}
+      {loading && !error && <PageStatus>Loading equipment…</PageStatus>}
+      {!loading && !error && items.length === 0 && <PageStatus>No equipment matches these filters.</PageStatus>}
 
-      <ul className="grid gap-3 sm:grid-cols-2">
+      <ul className="catalogue-grid" aria-label="Equipment">
         {items.map((item) => (
-          <li
-            key={item.id}
-            className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <strong className="text-gray-900">{item.name}{item.isKit && <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">Kit</span>}</strong>
-              <StatusBadge status={item.status} />
-            </div>
-            <div className="mt-1 text-sm text-gray-600">
-              {item.assetCode} · {item.category}
-            </div>
-            {item.expectedReturn && (
-              <div className="mt-1 text-sm text-gray-900">
-                Expected return:{" "}
-                {new Date(item.expectedReturn).toLocaleDateString("en-GB", {
-                  day: "numeric",
-                  month: "long",
-                  year: "numeric",
-                })}
+          <li key={item.id} className="panel catalogue-card">
+            <div className="catalogue-card-heading">
+              <div className="catalogue-tile">
+                <Icon name={item.isKit ? "kit" : "equipment"} />
               </div>
+              <div>
+                <h2>{item.name}</h2>
+                <p className="catalogue-meta">{item.assetCode}</p>
+                <p className="catalogue-meta">{item.category}{item.isKit && !/\bkits?\b/i.test(item.category) && " · Kit"}</p>
+              </div>
+              <div className="catalogue-status">
+                <StatusBadge status={item.status} />
+                {item.expectedReturn && (
+                  <p>
+                    Expected return{" "}
+                    <time dateTime={item.expectedReturn}>
+                      {new Date(item.expectedReturn).toLocaleDateString("en-GB", {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                      })}
+                    </time>
+                  </p>
+                )}
+              </div>
+            </div>
+            {item.canReserve && item.status === "Available" && !item.isRestricted && (
+              <ReservationForm itemId={item.id} itemName={item.name} />
             )}
-            {item.canReserve && item.status === "Available" && !item.isRestricted && <ReservationForm itemId={item.id} itemName={item.name} />}
           </li>
         ))}
       </ul>
-    </div>
+    </>
   );
 }

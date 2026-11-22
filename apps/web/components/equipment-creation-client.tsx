@@ -1,5 +1,7 @@
 "use client";
 
+import { PageHeading } from "@/components/page-heading";
+
 import { useEffect, useState, type FormEvent } from "react";
 import EquipmentQrLabel from "@/components/equipment/equipment-qr-label";
 type Category = {
@@ -14,7 +16,7 @@ type CreatedEquipment = {
 };
 
 const inputStyle =
-  "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100";
+  "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-aub-500 focus:outline-none focus:ring-2 focus:ring-aub-100";
 
 export default function EquipmentCreationClient() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -120,20 +122,9 @@ export default function EquipmentCreationClient() {
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-      <div className="mb-8">
-        <p className="text-sm font-semibold uppercase tracking-wider text-blue-700">
-          Equipment Management
-        </p>
-
-        <h1 className="mt-2 text-3xl font-bold text-slate-900">
-          Add Equipment
-        </h1>
-
-        <p className="mt-2 text-slate-600">
-          Register new equipment in your laboratory.
-        </p>
-      </div>
+    <div>
+      <PageHeading title="Manage equipment" section="Equipment" description="Register equipment and update records in your laboratory." />
+      <h2 className="mb-3 text-xl font-semibold">Add equipment</h2>
 
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <form onSubmit={handleSubmit} className="space-y-5">
@@ -270,7 +261,7 @@ export default function EquipmentCreationClient() {
           <button
             type="submit"
             disabled={saving || loadingCategories || categories.length === 0}
-            className="rounded-lg bg-blue-700 px-6 py-3 font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-aub-700 px-6 py-3 font-semibold text-white hover:bg-aub-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? "Creating Equipment..." : "Create Equipment"}
           </button>
@@ -299,6 +290,6 @@ export default function EquipmentCreationClient() {
 </div>
         </section>
       )}
-    </main>
+    </div>
   );
 }

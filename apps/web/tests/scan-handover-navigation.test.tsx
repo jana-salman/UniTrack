@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const itemId = "11111111-1111-4111-8111-111111111111";
 const reservationId = "22222222-2222-4222-8222-222222222222";
+const loanId = "44444444-4444-4444-8444-444444444444";
 
 vi.mock("@/components/equipment/equipment-qr-scanner", () => ({
   default: ({ onScan }: { onScan: (value: string) => void }) => (
@@ -91,6 +92,45 @@ async function scanWith(payload: ReturnType<typeof match>) {
 }
 
 describe("scan-to-handover navigation", () => {
+  it("uses the looked-up equipment ID and links to its active loan", async () => {
+    const fetchMatch = vi.fn().mockResolvedValue(Response.json({
+      ...match({ canHandover: false }),
+      activeLoan: { id: loanId, dueDate: "2026-11-22T11:00:00.000Z" },
+      confirmedReservations: [],
+    }));
+    vi.stubGlobal("fetch", fetchMatch);
+
+    await act(async () => root.render(<ScanResult canViewReservations initialItemId={itemId} />));
+    expect(fetchMatch).toHaveBeenCalledWith(`/api/reservations/pickup?itemId=${itemId}`, expect.any(Object));
+    expect(host.querySelector('a[href^="/return/"]')?.getAttribute("href")).toBe(`/return/${loanId}`);
+  });
+
+  it("ignores a preselected item when reservation visibility is unavailable", async () => {
+    const fetchMatch = vi.fn();
+    vi.stubGlobal("fetch", fetchMatch);
+    await act(async () => root.render(<ScanResult canViewReservations={false} initialItemId={itemId} />));
+    expect(fetchMatch).not.toHaveBeenCalled();
+    expect(host.querySelector("a")).toBeNull();
+  });
+
+  it("links only interrupted handovers for the selected equipment", async () => {
+    const otherItem = "55555555-5555-4555-8555-555555555555";
+    const otherReservation = "66666666-6666-4666-8666-666666666666";
+    const pending = { startedAt: "2026-11-22T09:00:00.000Z", state: "applied", recoverableByYou: true };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => Response.json(
+      url === "/api/handover" ? [
+        { ...pending, itemId, reservationId },
+        { ...pending, itemId: otherItem, reservationId: otherReservation },
+      ] : { ...match({ canHandover: false, equipmentStatus: "checked_out" }), confirmedReservations: [] },
+    )));
+
+    await act(async () => root.render(<ScanResult canViewReservations initialItemId={itemId} />));
+    await vi.waitFor(() => {
+      const links = [...host.querySelectorAll('a[href^="/handover/"]')].map((link) => link.getAttribute("href"));
+      expect(links).toEqual([`/handover/${reservationId}`]);
+    });
+  });
+
   it.each(["available", "reserved"])(
     "links eligible %s equipment to the confirmed reservation's handover route",
     async (equipmentStatus) => {

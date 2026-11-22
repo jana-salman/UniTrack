@@ -154,179 +154,54 @@ export default function EquipmentQrScanner({
   }, []);
 
   return (
-    <div
-      style={{
-        maxWidth: "420px",
-        padding: "20px",
-        border: "1px solid #d1d5db",
-        borderRadius: "10px",
-        backgroundColor: "#ffffff",
-        color: "#111827",
-      }}
-    >
-      <h2
-        style={{
-          fontSize: "20px",
-          fontWeight: 600,
-          marginBottom: "12px",
-        }}
-      >
-        Scan Equipment QR Code
-      </h2>
-
-      <p
-        style={{
-          fontSize: "14px",
-          marginBottom: "16px",
-        }}
-      >
-        Scan a UniTrack equipment QR code to read its UUID.
-      </p>
+    <div className="panel w-full max-w-lg space-y-4 p-4 sm:p-5">
+      <h2 className="text-xl font-semibold">Scan equipment QR code</h2>
 
       <video
         ref={videoRef}
         muted
         playsInline
         autoPlay
-        style={{
-          width: "100%",
-          minHeight: "200px",
-          backgroundColor: "#111827",
-          borderRadius: "8px",
-          display:
-            isScanning || isStarting ? "block" : "none",
-        }}
+        hidden={!isScanning && !isStarting}
+        className="min-h-50 w-full rounded-lg bg-slate-950"
       />
 
-      {error && (
-        <p
-          role="alert"
-          style={{
-            marginTop: "12px",
-            color: "#b91c1c",
-            fontSize: "14px",
-          }}
-        >
-          {error}
-        </p>
+      {error && <p role="alert" className="notice-panel text-sm">{error}</p>}
+
+      {isScanning || isStarting ? (
+        <button type="button" onClick={stopScanner} className="action-secondary">
+          Stop Scanner
+        </button>
+      ) : (
+        <button type="button" onClick={startScanner} className="action-primary">
+          Start Scanner
+        </button>
       )}
 
-      <div style={{ marginTop: "16px" }}>
-        {isScanning || isStarting ? (
-          <button
-            type="button"
-            onClick={stopScanner}
-            style={{
-              padding: "10px 16px",
-              backgroundColor: "#dc2626",
-              color: "#ffffff",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-            }}
-          >
-            Stop Scanner
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={startScanner}
-            style={{
-              padding: "10px 16px",
-              backgroundColor: "#111827",
-              color: "#ffffff",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-            }}
-          >
-            Start Scanner
-          </button>
-        )}
-      </div>
-
-      <div
-        style={{
-          marginTop: "24px",
-          paddingTop: "20px",
-          borderTop: "1px solid #d1d5db",
+      <form
+        className="grid gap-2 border-t border-slate-200 pt-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          handleManualSubmit();
         }}
       >
-        <h3
-          style={{
-            fontSize: "16px",
-            fontWeight: 600,
-            marginBottom: "8px",
-          }}
-        >
-          Enter Equipment UUID Manually
-        </h3>
-
-        <p
-          style={{
-            fontSize: "14px",
-            color: "#4b5563",
-            marginBottom: "12px",
-          }}
-        >
-          If you cannot use the camera, enter the
-          equipment UUID below.
-        </p>
-
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            handleManualSubmit();
-          }}
-        >
-          <label
-            htmlFor="manual-equipment-uuid"
-            style={{
-              display: "block",
-              fontSize: "14px",
-              fontWeight: 600,
-              marginBottom: "6px",
-            }}
-          >
-            Equipment UUID
-          </label>
-
-          <input
-            id="manual-equipment-uuid"
-            type="text"
-            value={manualId}
-            onChange={(event) =>
-              setManualId(event.target.value)
-            }
-            placeholder="Enter equipment UUID"
-            autoComplete="off"
-            spellCheck={false}
-            style={{
-              width: "100%",
-              padding: "10px",
-              border: "1px solid #9ca3af",
-              borderRadius: "6px",
-              boxSizing: "border-box",
-              fontSize: "14px",
-            }}
-          />
-
-          <button
-            type="submit"
-            style={{
-              marginTop: "12px",
-              padding: "10px 16px",
-              backgroundColor: "#1d4ed8",
-              color: "#ffffff",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-            }}
-          >
-            Submit Equipment UUID
-          </button>
-        </form>
-      </div>
+        <label className="font-semibold" htmlFor="manual-equipment-uuid">Equipment UUID</label>
+        <p className="text-sm text-slate-600" id="manual-uuid-help">Enter the equipment UUID if the camera is unavailable.</p>
+        <input
+          id="manual-equipment-uuid"
+          aria-describedby="manual-uuid-help"
+          type="text"
+          value={manualId}
+          onChange={(event) => setManualId(event.target.value)}
+          placeholder="Enter equipment UUID"
+          autoComplete="off"
+          spellCheck={false}
+          className="min-h-11 min-w-0 rounded-lg border border-slate-300 bg-white px-3"
+        />
+        <button type="submit" className="action-secondary mt-1 justify-self-start">
+          Submit Equipment UUID
+        </button>
+      </form>
     </div>
   );
 }

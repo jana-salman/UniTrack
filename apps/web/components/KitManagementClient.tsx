@@ -1,5 +1,7 @@
 "use client";
 
+import { PageHeading } from "@/components/page-heading";
+
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import EquipmentQrLabel from "@/components/equipment/equipment-qr-label";
 
@@ -106,8 +108,8 @@ export default function KitManagementClient() {
   const componentOptions = equipment.filter(item => !kitIds.has(item.id) && item.status === "available" && !item.is_restricted);
 
   return (
-    <main className="mx-auto max-w-5xl space-y-8 p-4 sm:p-8">
-      <header><h1 className="text-2xl font-semibold text-slate-950">Kit management</h1><p className="mt-1 text-slate-600">Create kits with a main QR item, then add or remove tracked components.</p></header>
+    <div className="space-y-6">
+      <PageHeading title="Kit management" section="Kits" description="Create kits and manage their tracked components." />
       {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error}</p>}
       {success && <p role="status" className="rounded-lg bg-green-50 p-3 text-green-800">{success}</p>}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -117,8 +119,8 @@ export default function KitManagementClient() {
           <label className="text-sm font-medium">Kit name<input className={input} name="name" required maxLength={150} /></label>
           <label className="text-sm font-medium">Category<select className={input} name="category_id" required defaultValue=""><option value="" disabled>Select category</option>{categories.map(category => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label>
           <label className="text-sm font-medium">Description<input className={input} name="description" maxLength={500} /></label>
-          <fieldset className="sm:col-span-2"><legend className="text-sm font-medium">Tracked components</legend><div className="mt-2 flex flex-wrap gap-2">{componentOptions.map(item => <button type="button" key={item.id} onClick={() => setSelectedComponents(previous => previous.includes(item.id) ? previous.filter(id => id !== item.id) : [...previous, item.id])} aria-pressed={selectedComponents.includes(item.id)} className={`rounded-lg border px-3 py-2 text-sm ${selectedComponents.includes(item.id) ? "border-blue-700 bg-blue-50 text-blue-800" : "border-slate-300 text-slate-700"}`}>{item.name} · {item.asset_code}</button>)}{!componentOptions.length && <span className="text-sm text-slate-500">No eligible component items are available.</span>}</div></fieldset>
-          <button disabled={busy} className="min-h-11 rounded-lg bg-blue-700 px-4 font-semibold text-white disabled:opacity-50 sm:col-span-2">{busy ? "Saving…" : "Create kit"}</button>
+          <fieldset className="sm:col-span-2"><legend className="text-sm font-medium">Tracked components</legend><div className="mt-2 flex flex-wrap gap-2">{componentOptions.map(item => <button type="button" key={item.id} onClick={() => setSelectedComponents(previous => previous.includes(item.id) ? previous.filter(id => id !== item.id) : [...previous, item.id])} aria-pressed={selectedComponents.includes(item.id)} className={`rounded-lg border px-3 py-2 text-sm ${selectedComponents.includes(item.id) ? "border-aub-700 bg-aub-50 text-aub-800" : "border-slate-300 text-slate-700"}`}>{item.name} · {item.asset_code}</button>)}{!componentOptions.length && <span className="text-sm text-slate-500">No eligible component items are available.</span>}</div></fieldset>
+          <button disabled={busy} className="min-h-11 rounded-lg bg-aub-700 px-4 font-semibold text-white disabled:opacity-50 sm:col-span-2">{busy ? "Saving…" : "Create kit"}</button>
         </form>
       </section>
       <section className="space-y-4"><h2 className="text-lg font-semibold">Existing kits</h2>
@@ -145,6 +147,6 @@ export default function KitManagementClient() {
           </article>;
         })}
       </section>
-    </main>
+    </div>
   );
 }

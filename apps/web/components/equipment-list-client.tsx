@@ -260,7 +260,7 @@ async function retireEquipment(item: EquipmentItem) {
   }
 }
   return (
-    <section className="mx-auto mt-8 max-w-7xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+    <section className="panel mt-6 p-4 sm:p-6">
       <h2 className="text-2xl font-bold text-slate-900">
         Existing Equipment
       </h2>
@@ -294,7 +294,7 @@ async function retireEquipment(item: EquipmentItem) {
         </p>
       )}
 {selectedEquipmentId && editDraft && (
-  <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-6">
+  <div className="mt-6 rounded-xl border border-aub-200 bg-aub-50 p-6">
     <h3 className="mb-2 text-xl font-bold text-slate-900">
       Edit Equipment
     </h3>
@@ -424,7 +424,7 @@ async function retireEquipment(item: EquipmentItem) {
   type="button"
   onClick={() => void saveEquipmentChanges()}
   disabled={saving}
-  className="mt-5 mr-3 rounded-lg bg-blue-600 px-5 py-3 text-white hover:bg-blue-700 disabled:opacity-50"
+  className="mt-5 mr-3 rounded-lg bg-aub-600 px-5 py-3 text-white hover:bg-aub-700 disabled:opacity-50"
 >
   {saving ? "Saving..." : "Save Changes"}
 </button>
@@ -441,7 +441,7 @@ async function retireEquipment(item: EquipmentItem) {
   </div>
 )}
       {!loading && !error && equipment.length > 0 && (
-        <div className="mt-6 overflow-x-auto">
+        <div className="mt-6 overflow-x-auto" role="region" aria-label="Equipment inventory" tabIndex={0}>
           <table className="w-full border-collapse text-left">
             <thead>
               <tr className="border-b border-slate-200">
@@ -480,7 +480,7 @@ async function retireEquipment(item: EquipmentItem) {
     is_restricted: item.is_restricted,
   });
 }}
-    className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+    className="rounded-lg bg-aub-600 px-4 py-2 text-white hover:bg-aub-700"
   >
     {selectedEquipmentId === item.id ? "Selected" : "Edit"}
   </button>

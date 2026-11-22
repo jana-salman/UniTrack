@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReturnActions from "./return-actions";
 import {
   isReturnDetails,
@@ -62,6 +62,8 @@ export default function ReturnDetails({
 }: {
   loanId: string;
 }) {
+  const [historyRequest, setHistoryRequest] = useState(0);
+  const historyHeading = useRef<HTMLHeadingElement>(null);
   const [state, setState] = useState<LoadState>({
     status: "loading",
   });
@@ -113,17 +115,27 @@ export default function ReturnDetails({
     void loadDetails();
 
     return () => controller.abort();
-  }, [loanId]);
+  }, [loanId, historyRequest]);
+
+  useEffect(() => {
+    if (historyRequest && state.status === "ready") historyHeading.current?.focus();
+  }, [historyRequest, state]);
+
+  function viewHistory() {
+    setState({ status: "loading" });
+    setHistoryRequest((request) => request + 1);
+  }
 
   if (state.status === "loading") {
-    return <p role="status">Loading pickup record...</p>;
+    return <p role="status" className="status-panel">{historyRequest ? "Loading return history…" : "Loading pickup record…"}</p>;
   }
 
   if (state.status === "error") {
     return (
-      <p role="alert" className="text-red-700">
-        {state.message}
-      </p>
+      <>
+        <p role="alert" className="notice-panel">{state.message}</p>
+        {historyRequest > 0 && <button className="action-secondary" type="button" onClick={viewHistory}>Retry return history</button>}
+      </>
     );
   }
 
@@ -206,7 +218,7 @@ export default function ReturnDetails({
         )}
       </div>
       {loan.returned_at && <section aria-labelledby="return-history-heading" className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 id="return-history-heading" className="text-xl font-semibold text-slate-950">Return history</h2>
+        <h2 id="return-history-heading" ref={historyHeading} tabIndex={-1} className="text-xl font-semibold text-slate-950">Return history</h2>
         {state.data.returnHistory ? <>
           <p>Returned: <time dateTime={state.data.returnHistory.returnedAt}>{formatDate(state.data.returnHistory.returnedAt)}</time></p>
           <p className="font-semibold">{state.data.returnHistory.isLate ? "Late return" : "On-time return"}</p>
@@ -219,13 +231,20 @@ export default function ReturnDetails({
           </li>)}</ul>
         </> : <p role="status">Return history is unavailable. Please try again later.</p>}
       </section>}
-      {loan.returned_at === null && pickupConditions.length > 0 && (
+      {loan.returned_at === null && historyRequest > 0 && (
+        <div>
+          <p role="status" className="status-panel">Return history is unavailable.</p>
+          <button className="action-secondary" type="button" onClick={viewHistory}>Retry return history</button>
+        </div>
+      )}
+      {loan.returned_at === null && historyRequest === 0 && pickupConditions.length > 0 && (
         <ReturnActions
           key={loan.id}
           loanId={loan.id}
           pickupConditions={pickupConditions}
           equipmentName={equipment.name}
           componentNames={componentNames}
+          onViewHistory={viewHistory}
         />
       )}
     </section>
