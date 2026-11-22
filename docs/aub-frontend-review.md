@@ -29,7 +29,8 @@
 | Authenticated Chromium with synthetic upstreams | PASS | Desktop and mobile catalogue, clipped and focused skip link, correct skip target, asset-code lookup placement, role denial, manager screens, reservation submission, handover confirmation and recovery, normal and fresh damaged returns, history and student issue visibility. |
 | Shared header menu in Chromium with synthetic upstreams | PASS | Student, Professor, Lab Assistant, and Lab Manager at 1440 and 375 pixels. Checked default closure, exact role links, active link, Enter and Tab, Escape and restored focus, outside click, closing on navigation, and manager form width. |
 | Synthetic QR camera | PASS | Chromium decoded a prerecorded QR stream and stopped the scanner. |
-| Live role and custody acceptance | BLOCKED | The reported Professor role supports read-only catalogue, lookup, and scan checks. The dedicated InPrivate window was awaiting sign-in. The custody workflow needs separate designated role access and equipment. No shared records were mutated. |
+| Real Professor acceptance | PASS | Confirmed Professor session in the controlled Edge InPrivate window. Role navigation, catalogue filtering, successful and no-match lookup (HTTP 200 and 404), and manual UUID input passed. Assistant scan controls and manager navigation were absent. The direct manager route displayed Access denied, and the student return-problems API returned HTTP 403. |
+| Live custody and manager acceptance | BLOCKED | A test-labelled item was available in the catalogue. Its designation and pickup windows still need confirmation, and the remaining workflows require separate designated role access. No shared records were mutated. |
 | Physical-device camera and deployed acceptance | NOT RUN | Desktop Chromium emulated mobile viewports and camera input. |
 
 The initial baseline build stopped at a Next.js version notice. Restoring the lockfile pin with `npm ci` resolved that. Earlier disposable harness runs hit a sub-millisecond status-guard case and a transient container socket startup error. Its final standard run passed.
@@ -48,6 +49,6 @@ The authenticated screenshots contain synthetic profiles and equipment.
 
 **NOT READY for live acceptance.** Provide the following for the remaining checks.
 
-- Sign in as Professor in the dedicated Edge InPrivate window for live read-only checks. Provide a designated student and lab assistant in the same lab for custody checks, and a designated lab manager for live manager checks.
-- Identify eligible test equipment by asset code in that lab for new normal and problem-return scenarios, with a pickup window available for the test. Use fresh reservations and loans.
+- Provide a designated student and lab assistant in the same lab for custody checks, and a designated lab manager for live manager checks.
+- Confirm an eligible test asset and two pickup windows in that lab, or a second test asset with its own window, for fresh normal and problematic return scenarios.
 - Provide a physical phone and QR label for device acceptance, and an accessible deployed URL if deployed acceptance is required.
