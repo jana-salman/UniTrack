@@ -61,6 +61,13 @@ try {
   Invoke-PsqlFile '/workspace/database/migrations/S2-02_no_double_booking.sql' 'Migration S2-02'
   Invoke-PsqlFile '/workspace/database/local-test/verify_S2-02.sql' 'Migration S2-02 verification'
 
+  Write-Host 'Applying (twice, to prove idempotency) and verifying C430PRJCT-40 handover migration locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/C430PRJCT-40_S2-09_handover_confirmation.sql' 'Migration C430PRJCT-40'
+  Invoke-PsqlFile '/workspace/database/migrations/C430PRJCT-40_S2-09_handover_confirmation.sql' 'Migration C430PRJCT-40 re-run'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_C430PRJCT-40.sql' 'Migration C430PRJCT-40 verification'
+  Write-Host 'Re-verifying S2-02 after the handover migration (constraint must be untouched)...'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_S2-02.sql' 'Migration S2-02 re-verification'
+
   Write-Host 'Seeding a legacy returned loan before migration 007...'
   Invoke-PsqlFile '/workspace/database/local-test/prepare_007_legacy.sql' 'Migration 007 legacy fixture'
 
@@ -70,8 +77,15 @@ try {
   Write-Host 'Verifying migration 007 custody protection locally...'
   Invoke-PsqlFile '/workspace/database/local-test/verify_007.sql' 'Migration 007 verification'
 
+  Write-Host 'Re-verifying C430PRJCT-40 after final custody restrictions...'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_C430PRJCT-40.sql' 'Combined C430PRJCT-40 and migration 007 verification'
+
   Push-Location $repositoryRoot
   try {
+    Write-Host 'Building shared workspace packages used by the integration tests...'
+    npm run build:packages
+    Assert-LastExitCode 'Shared package build'
+
     Write-Host 'Running the existing static migration compatibility test...'
     npm test --workspace=@unitrack/equipment -- --run tests/migration-compatibility.test.ts
     Assert-LastExitCode 'Static migration compatibility test'
@@ -82,6 +96,10 @@ try {
       Write-Host 'Running real PostgreSQL Equipment/Loans integration tests...'
       npm test --workspace=@unitrack/loans -- --run tests/postgres-migrations.integration.test.ts
       Assert-LastExitCode 'PostgreSQL microservice integration test'
+
+      Write-Host 'Running real PostgreSQL handover (C430PRJCT-40) integration tests as restricted service roles...'
+      npm test --workspace=@unitrack/loans -- --run tests/postgres-handover.integration.test.ts
+      Assert-LastExitCode 'PostgreSQL handover integration test'
     }
     finally {
       if ($null -eq $previousTestDatabaseUrl) {
@@ -96,7 +114,7 @@ try {
     Pop-Location
   }
 
-  Write-Host 'PASS: migrations 003-007 and S2-02, plus the focused microservice integration checks, passed locally.'
+  Write-Host 'PASS: migrations 003-007, S2-02 and C430PRJCT-40, plus the focused microservice integration checks, passed locally.'
 }
 finally {
   if ($containerStarted) {

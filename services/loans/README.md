@@ -2,8 +2,9 @@
 
 Independent authenticated Next.js Loans backend. It owns `loans`,
 `reservations`, and `condition_records`; it never queries Users or Equipment
-tables. Current routes provide same-lab due dates and the recoverable return
-workflow. Returns call Equipment over signed HTTP with stable idempotency keys.
+tables. Current routes provide same-lab due dates, the recoverable return
+workflow and the S2-09 handover (`/handover/:reservationId`, see
+[docs/handover-s2-09.md](../../docs/handover-s2-09.md)). Returns call Equipment over signed HTTP with stable idempotency keys.
 Web aggregates borrower/equipment labels through the owning services.
 
 Public `GET /health` is configuration-free. Business routes require verified
