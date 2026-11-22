@@ -168,7 +168,7 @@ body {
   white-space: nowrap;
 }
 
-.sign-out:hover, .menu-toggle:hover { background: var(--color-aub-50); }
+.sign-out:hover { background: var(--color-aub-50); }
 
 .skip-link {
   position: absolute;
@@ -198,19 +198,24 @@ body {
   display: inline-flex;
   align-items: center;
   gap: .4rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--brand);
+  border-radius: .15rem;
+  background: var(--brand);
+  color: white;
 }
+
+.menu-toggle:hover, .menu-toggle[aria-expanded="true"] { background: var(--color-aub-800); }
 
 .workspace-menu-panel {
   position: absolute;
-  inset-block-start: calc(100% + .35rem);
-  inset-inline-start: var(--gutter);
-  width: min(19rem, calc(100% - 2 * var(--gutter)));
-  max-height: min(27rem, 65dvh);
+  inset-block-start: 100%;
+  inset-inline-start: 0;
+  width: min(19rem, calc(100% - 1rem));
+  max-height: min(30rem, 70dvh);
   overflow: auto;
   padding: .5rem;
   border: 1px solid var(--line);
-  border-radius: .65rem;
+  border-inline-start: 0;
   background: var(--paper);
   box-shadow: 0 .3rem 1rem #302c2920;
 }
@@ -409,11 +414,6 @@ body {
 .public-panel h1 { font-size: clamp(1.75rem, 3vw, 2.3rem); }
 .public-shell .site-footer { margin: 0 var(--gutter) 1rem; }
 
-@media (min-width: 45rem) {
-  .workspace-menu { position: relative; }
-  .workspace-menu-panel { inset-inline-start: 0; width: 19rem; }
-}
-
 @media (max-width: 68rem) {
   .catalogue-card-heading { grid-template-columns: auto minmax(0, 1fr); }
   .catalogue-status { grid-column: 2; text-align: left; }
@@ -426,6 +426,14 @@ body {
   .catalogue-filters, .catalogue-grid { grid-template-columns: minmax(0, 1fr); }
   .catalogue-card-heading { min-height: 0; }
   .public-content { align-items: start; }
+}
+
+@media (max-width: 23rem) {
+  .workspace-header-start { column-gap: .5rem; }
+  .workspace-header-start .brand { gap: .45rem; }
+  .workspace-header-start .brand img { width: 5rem; }
+  .workspace-header-start .brand-wordmark > span { font-size: .72rem; }
+  .menu-toggle { padding-inline: .45rem; }
 }
 
 .reserve-dates { container-type: inline-size; }

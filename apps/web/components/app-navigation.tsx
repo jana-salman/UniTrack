@@ -10,8 +10,8 @@ export function AppNavigation({ profile }: { profile: Profile }) {
       <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="institutional-header workspace-header">
         <div className="workspace-header-start">
-          <Brand href="/dashboard" />
           <WorkspaceMenu links={workspaceLinks(profile.role)} labId={profile.lab_id} />
+          <Brand href="/dashboard" />
         </div>
         <div className="workspace-account">
           <div className="account-identity">

@@ -41,6 +41,10 @@ describe("roles and navigation", () => {
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain('aria-controls="workspace-menu-panel"');
     expect(markup).toMatch(/id="workspace-menu-panel"[^>]+hidden=""/);
+    expect(markup.indexOf('aria-controls="workspace-menu-panel"')).toBeLessThan(
+      markup.indexOf('alt="American University of Beirut"'),
+    );
+    expect(markup).toContain('src="/aub-logo-transparent.png"');
     expect(markup).toMatch(/href="\/catalogue" aria-current="page"|aria-current="page" href="\/catalogue"/);
     expect(markup.match(/aria-label="Primary navigation"/g)).toHaveLength(1);
 
