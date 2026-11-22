@@ -4,42 +4,46 @@
 
 | Reference | SHA |
 | --- | --- |
-| Starting HEAD and fetched `origin/main` | `0061916ae7505a2e0b1c171d3b6d4757bc98fdee` |
-| Local `main` at start and finish | `0061916ae7505a2e0b1c171d3b6d4757bc98fdee` |
-| Existing `backup/main-before-aub-theme` at start and finish | `0061916ae7505a2e0b1c171d3b6d4757bc98fdee` |
-| Implementation on `feature/aub-frontend-theme` | `d7b7cc1a10d2a1fdd71d29f5c340fa89a6174507` |
+| Starting baseline, fetched `origin/main`, local `main`, and `backup/main-before-aub-theme` | `0061916ae7505a2e0b1c171d3b6d4757bc98fdee` |
+| Initial AUB implementation | `d7b7cc1a10d2a1fdd71d29f5c340fa89a6174507` |
+| Initial review evidence, direct child of the implementation | `f488fc86adb452edb812f3329bbe357efed5025e` |
+| Focused Web implementation | `5039d63a02e17f465963502e8fa508ca8a95e015` |
 
-## Screens and workflows
+## Review findings
 
-- Applied the supplied AUB logo, burgundy and ivory styling, a shared workspace shell, role-aware navigation, mobile keyboard controls, and consistent headings and feedback. Covered login, access denial, missing pages, dashboard, catalogue, lookup, scan, custody forms, and manager equipment, kits, categories, and roles.
-- Kept `/catalogue` at its existing URL in the protected route group. Search follows the Equipment service’s name and asset-code filters. Cards use actual status, due date, and reservation eligibility. The student dashboard retains its own-return problem view.
-- Lab assistants can select an item through lookup and continue to scan matching. Results link to eligible pickups, active loans, and unfinished handovers for the selected item using existing server-authorized records. Return history is accessible after a confirmed return. The service has no browse view for arbitrary completed loans, so revisiting earlier history still requires a known loan record.
+- The AUB workspace covers login, access denial, missing pages, dashboard, catalogue, lookup, scan, custody forms, and manager equipment, kits, categories, and roles. The catalogue retains its URL and uses Equipment’s name and asset-code search. On scan, asset-code lookup now comes before the scanner’s manual UUID fallback. Catalogue icons use known category names or the kit flag, with a generic icon for unknown categories.
+- At 375 pixels on handover and return, the skip link is visually clipped until focused. Keyboard focus puts it in a row above the header. Enter moves focus to `main#main-content`, then the link is visually clipped again. The updated screenshots were captured after clearing focus.
+- The original screenshot fixture saved the Loans result as `checked_out` but kept returning a static `reserved` Equipment snapshot. The handover UI used the snapshot for both labels. The fixture now advances its Equipment snapshot on successful checkout. The UI uses the validated confirmation or recovery response for “Equipment status at handover” and the Equipment read for “Current equipment status.” A focused regression passes through the Web gateway and service handlers with a deliberately different Equipment read. A reopened record shows its current status using the live Equipment read. The existing Loans service checks the checkout receipt and status before recording completion. The inconsistent screenshot established no backend defect.
+- The light gray border comes from opaque pixels in the supplied PNG. The logo wrapper has no separate background, and the asset’s Git blob is identical to the initial implementation.
+- Run the real services with `npm run dev:all` and open `http://localhost:3000`. Next.js accepted the HMR upgrade with HTTP 101 on `localhost` and logged a development-origin denial for `127.0.0.1`. The real student dashboard hydrated on the documented hostname, and the synthetic signed-in browser suite also passed there in dev mode. Origin checks, authentication, and TLS settings are unchanged.
 
 ## Verification
 
-| Check | Baseline | Final | Evidence |
-| --- | --- | --- | --- |
-| `npm run typegen`, `npm run lint`, `npm run typecheck` | PASS | PASS | All root workspace commands exited 0. |
-| `npm test` | PASS | PASS | 911 baseline and 914 final tests passed. The 50 PostgreSQL tests skipped under the default script ran in the disposable harness. |
-| `npm run build` | FAIL | PASS | The installed Next.js 16.4.4 initially stopped at its security notice. `npm ci` restored the existing 16.4.5 pin and all four apps built. |
-| Disposable PostgreSQL `database/local-test/run.ps1` | FAIL | PASS | Initial harness runs hit a status-guard case involving sub-millisecond reservation end times and a transient container socket startup error. The final unmodified runner exited 0, including all 10 status-guard and 26 handover tests. |
-| Documented `dev:all` and public Chromium checks | NOT RUN | PASS | Four HTTP 200 health responses. Public redirects, university-domain error, keyboard focus, access denial and missing-page views checked at 375 and 1440 pixels. |
-| Authenticated Chromium with synthetic upstreams | NOT RUN | PASS | Local production build exercised sign-in/out, role denial, all manager screens, name and asset-code/category filters, mobile menu and focus, reservation form and submit, scan and lookup links, confirmed and recovered handover, normal and damaged returns, history, and student problem visibility. |
-| Synthetic QR camera | NOT RUN | PASS | Chromium read a prerecorded QR frame stream and stopped scanning after the match. |
-| Live authenticated acceptance and shared writes | NOT RUN | BLOCKED | Designated shared accounts and equipment were unavailable. No shared records were mutated. |
-| Physical mobile camera and deployed Vercel acceptance | NOT RUN | NOT RUN | Requires a physical device and the deployed application. |
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Final workspace scripts | PASS | `npm run typegen`, `npm test`, `npm run lint`, `npm run typecheck`, and `npm run build` exited 0. The default suite passed 915 tests and skipped 50 PostgreSQL cases. |
+| Disposable PostgreSQL | PASS | Reused the prior standard harness result for unchanged services and schema. It ran the 50 cases, including all 10 status-guard and 26 handover tests. |
+| Real services and existing browser session | PASS | Four health endpoints returned HTTP 200. Anonymous protected pages redirected and the catalogue API returned 401. The existing Chrome student session loaded the dashboard and made an authenticated `GET /api/returns/problems/mine` that returned 200 through Web and Loans. |
+| Authenticated Chromium with synthetic upstreams | PASS | Desktop and mobile catalogue, clipped and focused skip link, correct skip target, asset-code lookup placement, role denial, manager screens, reservation submission, handover confirmation and recovery, normal and fresh damaged returns, history and student issue visibility. |
+| Synthetic QR camera | PASS | Chromium decoded a prerecorded QR stream and stopped the scanner. |
+| Live role and custody acceptance | BLOCKED | The active student session’s test designation, other designated role access, and eligible shared test equipment were unavailable. No shared records were mutated. |
+| Physical-device camera and deployed acceptance | NOT RUN | Desktop Chromium emulated mobile viewports and camera input. |
 
-The authenticated development-browser run stalled before hydration while the HMR WebSocket handshake was failing. The authenticated browser results above come from the local production build. The existing POST origin check rejected the IP alias in that build. Testing used `localhost` as documented.
+The initial baseline build stopped at a Next.js version notice. Restoring the lockfile pin with `npm ci` resolved that. Earlier disposable harness runs hit a sub-millisecond status-guard case and a transient container socket startup error. Its final standard run passed.
 
 ## Screenshots
 
 - Login [desktop](aub-theme-screenshots/login-desktop.png) and [mobile](aub-theme-screenshots/login-mobile.png)
-- Catalogue [desktop](aub-theme-screenshots/catalogue-desktop-fixture.png) and [mobile](aub-theme-screenshots/catalogue-mobile-fixture.png)
-- [Manager equipment](aub-theme-screenshots/manager-equipment-desktop-fixture.png), [scan](aub-theme-screenshots/scan-mobile-fixture.png), and [handover](aub-theme-screenshots/handover-mobile-fixture.png)
-- [Normal return history](aub-theme-screenshots/return-history-mobile-fixture.png) and [problematic return history](aub-theme-screenshots/problem-return-mobile-fixture.png)
+- Updated catalogue [desktop](aub-theme-screenshots/catalogue-desktop-fixture.png) and [mobile](aub-theme-screenshots/catalogue-mobile-fixture.png)
+- Updated [manager equipment](aub-theme-screenshots/manager-equipment-desktop-fixture.png), [scan](aub-theme-screenshots/scan-mobile-fixture.png), and [handover](aub-theme-screenshots/handover-mobile-fixture.png)
+- Updated [normal return history](aub-theme-screenshots/return-history-mobile-fixture.png) and [problematic return history](aub-theme-screenshots/problem-return-mobile-fixture.png)
 
-Authenticated screenshots use synthetic profiles and equipment. The implementation diff is confined to Web UI and Web tests. Review found no private configuration, browser session state, service changes, or migration changes.
+The authenticated screenshots contain synthetic profiles and equipment.
 
-## Recommendation
+## Recommendation and remaining acceptance
 
-**NOT READY for live acceptance.** The workspace, disposable PostgreSQL, and synthetic browser results support code review. Shared sign-in and custody acceptance still need designated accounts and equipment. Physical camera and deployed checks remain outstanding.
+**NOT READY for live acceptance.** Provide the following for the remaining checks.
+
+- Confirm the existing student session is a designated test account or provide a designated student sign-in. Provide a designated lab assistant in the same lab and a designated lab manager for live manager checks.
+- Identify eligible test equipment by asset code in that lab for new normal and problem-return scenarios, with a pickup window available for the test. Use fresh reservations and loans.
+- Provide a physical phone and QR label for device acceptance, and an accessible deployed URL if deployed acceptance is required.
