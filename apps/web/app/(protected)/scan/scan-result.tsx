@@ -42,6 +42,8 @@ const eligibilityStyles: Record<PickupEligibility, string> = {
   expired: "border-slate-200 bg-slate-50 text-slate-600",
 };
 
+const handoverEquipmentStatuses = new Set(["available", "reserved"]);
+
 export default function ScanResult({
   canViewReservations,
 }: ScanResultProps) {
@@ -226,52 +228,58 @@ export default function ScanResult({
                     Confirmed Reservations
                   </h3>
 
-                  {match.confirmedReservations.map((reservation) => (
-                    <div
-                      key={reservation.id}
-                      className={`rounded-lg border p-4 ${
-                        eligibilityStyles[reservation.eligibility]
-                      }`}
-                    >
-                      <h4 className="text-sm font-semibold">
-                        {eligibilityLabels[reservation.eligibility]}
-                      </h4>
+                  {match.confirmedReservations.map((reservation) => {
+                    const canProceedToHandover =
+                      match.canHandover &&
+                      reservation.eligibility === "eligible" &&
+                      match.equipment.id.toLowerCase() ===
+                        scannedId.toLowerCase() &&
+                      handoverEquipmentStatuses.has(match.equipment.status);
 
-                      <p className="mt-2 text-sm">
-                        Start:{" "}
-                        {new Date(
-                          reservation.startAt,
-                        ).toLocaleString()}
-                      </p>
-
-                      <p className="mt-1 text-sm">
-                        End:{" "}
-                        {new Date(
-                          reservation.endAt,
-                        ).toLocaleString()}
-                      </p>
-
-                      {/* Temporarily disabled until S2-09 is integrated. */}
-                      <button
-                        type="button"
-                        disabled
-                        className="mt-3 cursor-not-allowed rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-500"
+                    return (
+                      <div
+                        key={reservation.id}
+                        className={`rounded-lg border p-4 ${
+                          eligibilityStyles[reservation.eligibility]
+                        }`}
                       >
-                        {match.canHandover &&
-                        reservation.eligibility === "eligible"
-                          ? "Proceed to Handover"
-                          : "Handover unavailable"}
-                      </button>
+                        <h4 className="text-sm font-semibold">
+                          {eligibilityLabels[reservation.eligibility]}
+                        </h4>
 
-                      {match.canHandover &&
-                        reservation.eligibility === "eligible" && (
-                          <p className="mt-2 text-sm text-slate-600">
-                            Handover is temporarily disabled pending
-                            integration.
-                          </p>
+                        <p className="mt-2 text-sm">
+                          Start:{" "}
+                          {new Date(
+                            reservation.startAt,
+                          ).toLocaleString()}
+                        </p>
+
+                        <p className="mt-1 text-sm">
+                          End:{" "}
+                          {new Date(
+                            reservation.endAt,
+                          ).toLocaleString()}
+                        </p>
+
+                        {canProceedToHandover ? (
+                          <Link
+                            href={`/handover/${encodeURIComponent(reservation.id)}`}
+                            className="mt-3 inline-block rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800"
+                          >
+                            Proceed to Handover
+                          </Link>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled
+                            className="mt-3 cursor-not-allowed rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-500"
+                          >
+                            Handover unavailable
+                          </button>
                         )}
-                    </div>
-                  ))}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
