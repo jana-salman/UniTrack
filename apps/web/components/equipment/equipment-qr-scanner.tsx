@@ -185,8 +185,8 @@ export default function EquipmentQrScanner({
           handleManualSubmit();
         }}
       >
-        <label className="font-semibold" htmlFor="manual-equipment-uuid">Equipment UUID</label>
-        <p className="text-sm text-slate-600" id="manual-uuid-help">Enter the equipment UUID if the camera is unavailable.</p>
+        <label className="text-sm font-semibold" htmlFor="manual-equipment-uuid">Equipment UUID</label>
+        <p className="text-sm text-slate-600" id="manual-uuid-help">Manual fallback if you already know the item’s UUID.</p>
         <input
           id="manual-equipment-uuid"
           aria-describedby="manual-uuid-help"

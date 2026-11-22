@@ -89,6 +89,10 @@ npm run dev:all
 `dev:all` starts Web on 3000, Users on 3001, Equipment on 3002, and Loans on
 3003. Press `Ctrl+C` to stop the four-process group.
 
+Open Web at `http://localhost:3000`. Next.js development resource requests
+use the hostname, and the default development origin check blocks the HMR
+connection when the browser opens this setup through `127.0.0.1`.
+
 ## 6. Verify health
 
 With `dev:all` running, execute in another terminal:

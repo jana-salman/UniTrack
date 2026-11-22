@@ -93,7 +93,7 @@ body {
 .workspace-shell {
   display: grid;
   min-height: 100dvh;
-  grid-template: "header header" auto "sidebar content" 1fr / var(--sidebar-width) minmax(0, 1fr);
+  grid-template: "skip skip" auto "header header" auto "sidebar content" 1fr / var(--sidebar-width) minmax(0, 1fr);
 }
 
 .institutional-header {
@@ -164,18 +164,28 @@ body {
 .sign-out:hover, .menu-toggle:hover { background: var(--color-aub-50); }
 
 .skip-link {
-  position: fixed;
-  z-index: 5;
-  top: .5rem;
-  left: .5rem;
-  transform: translateY(-150%);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip-link:focus {
+  position: static;
+  grid-area: skip;
+  justify-self: start;
+  width: auto;
+  height: auto;
+  clip-path: none;
+  margin: .55rem var(--gutter);
   border-radius: .4rem;
   padding: .65rem 1rem;
   background: var(--paper);
   color: var(--brand);
+  font-weight: 700;
 }
-
-.skip-link:focus { transform: none; }
 
 .workspace-menu {
   grid-area: sidebar;
@@ -394,7 +404,7 @@ body {
 }
 
 @media (max-width: 54rem) {
-  .workspace-shell { grid-template: "header" auto "sidebar" auto "content" 1fr / minmax(0, 1fr); }
+  .workspace-shell { grid-template: "skip" auto "header" auto "sidebar" auto "content" 1fr / minmax(0, 1fr); }
   .workspace-menu { display: block; border-right: 0; border-bottom: 1px solid var(--line); }
   .menu-toggle { display: flex; align-items: center; gap: .55rem; margin: .25rem var(--gutter); }
   .workspace-menu-panel { display: none; padding: .2rem var(--gutter) .85rem; gap: .6rem; }

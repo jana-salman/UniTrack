@@ -5,10 +5,24 @@ import StatusBadge from "@/components/StatusBadge";
 import { useRouter } from "next/navigation";
 import { isCatalogueItem, type CatalogueItem } from "@unitrack/contracts";
 import ReservationForm from "@/components/ReservationForm";
-import { Icon } from "@/components/icon";
+import { Icon, type IconName } from "@/components/icon";
 import { PageStatus } from "@/components/page-status";
 
 const REFRESH_MS = 30_000; // refresh every 30 s, so changes show within 1 minute
+
+const categoryIcons = new Map<string, IconName>([
+  ["audio/visual", "camera"],
+  ["audio/visual equipment", "camera"],
+  ["electronics", "circuit"],
+  ["instruments", "meter"],
+  ["measurement instruments", "meter"],
+  ["laboratory equipment", "lab"],
+  ["lab accessories", "plug"],
+]);
+
+function catalogueIcon({ category, isKit }: CatalogueItem): IconName {
+  return isKit ? "kit" : categoryIcons.get(category.trim().toLowerCase()) ?? "equipment";
+}
 
 export default function CatalogueClient() {
   const router = useRouter();
@@ -110,7 +124,7 @@ export default function CatalogueClient() {
           <li key={item.id} className="panel catalogue-card">
             <div className="catalogue-card-heading">
               <div className="catalogue-tile">
-                <Icon name={item.isKit ? "kit" : "equipment"} />
+                <Icon name={catalogueIcon(item)} />
               </div>
               <div>
                 <h2>{item.name}</h2>

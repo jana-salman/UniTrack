@@ -67,12 +67,41 @@ it("TC-3.1: renders the main item plus the five actual components, and after tic
   await confirmBoth();
   await submit();
   await waitForUi(() => expect(host.textContent).toContain("Handover complete"));
-  expect(host.textContent).toContain("Equipment status: Borrowed");
+  expect(host.textContent).toContain("Equipment status at handover: Borrowed");
   expect(host.textContent).toContain("University ID checked in person:");
   expect(host.textContent).toContain("Borrower: " + borrowerName);
   expect(host.textContent).toContain("Due: " + new Date(fixture.db.state.loans[0].due_date).toLocaleString());
   expect(fixture.status).toBe("checked_out"); expect(fixture.db.state.records).toHaveLength(6);
   expect(fixture.db.state.records.filter(r => r.kit_component_id === null)).toHaveLength(1);
+});
+
+it("keeps the confirmed checkout result distinct from a different Equipment read", async () => {
+  fixture.components = [];
+  const query = fixture.equipmentQuery.getMockImplementation()!;
+  fixture.equipmentQuery.mockImplementation((sql, values) =>
+    fixture.db.state.loans.length > 0 && sql.includes("FROM public.equipment_items") && sql.includes("ANY(")
+      ? Promise.resolve({ rows: [{ id: fixture.db.state.loans[0].item_id, name: fixture.itemName, asset_code: "KIT-HO-1", lab_id: 7, status: "reserved" }] })
+      : query(sql, values),
+  );
+
+  await open();
+  await fillRow(rows()[0]);
+  await confirmBoth();
+  await submit();
+  await waitForUi(() => {
+    expect(host.querySelector('[aria-labelledby="handover-complete"]')?.textContent).toContain("Equipment status at handover: Borrowed");
+    expect(host.querySelector("dd span")?.textContent).toBe("Reserved");
+  });
+  expect(fixture.status).toBe("checked_out");
+
+  await act(async () => root.unmount()); root = createRoot(host);
+  await act(async () => root.render(<HandoverDetails reservationId={reservationId} />));
+  await waitForUi(() => {
+    const completion = host.querySelector('[aria-labelledby="handover-complete"]');
+    expect(completion).not.toBeNull();
+    expect(completion?.textContent).not.toContain("Equipment status at handover");
+    expect(host.querySelector("dd span")?.textContent).toBe("Reserved");
+  });
 });
 
 it("renders a different component count dynamically", async () => {
@@ -228,7 +257,7 @@ it("an interrupted handover shows Finish interrupted handover, which completes i
   expect(host.querySelector("form")).toBeNull();
   await click([...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Finish interrupted handover")!);
   await waitForUi(() => expect(host.textContent).toContain("Handover complete"));
-  expect(host.textContent).toContain("Equipment status: Borrowed");
+  expect(host.textContent).toContain("Equipment status at handover: Borrowed");
   expect(fixture.db.state.loans).toHaveLength(1); expect(fixture.db.state.records).toHaveLength(6); expect(fixture.history).toHaveLength(1);
 });
 it("A1: the student's confirmation explicitly lists each missing component with its note", async () => {

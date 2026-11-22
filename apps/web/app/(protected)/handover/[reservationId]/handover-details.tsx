@@ -75,8 +75,9 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
   const { reservation, handover, equipment, components, borrower, partialData, pending, checklistVersion } = state.data;
   const equipmentName = equipment?.name ?? "Equipment name unavailable";
   const componentNames = Object.fromEntries((components ?? []).map(component => [component.id, component.name]));
-  // Loans only reports a completed handover after Equipment confirmed checkout.
-  const currentStatus = equipment ? statusLabel(equipment.status) : outcome ? statusLabel(outcome.status) : "Status unavailable";
+  const currentStatus = equipment ? statusLabel(equipment.status) : "Status unavailable";
+  // The successful action records the checkout. Equipment supplies a separate, live status.
+  const completionStatus = outcome && outcome.loanId === handover?.loanId ? statusLabel(outcome.status) : null;
 
   return (
     <section className="max-w-3xl space-y-6">
@@ -88,7 +89,7 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
           {equipmentName}{equipment?.assetCode ? ` (${equipment.assetCode})` : ""}
         </p>
         <dl className="mt-4 space-y-3 text-slate-700">
-          <div><dt className="font-semibold">Status</dt><dd><StatusBadge status={currentStatus} /></dd></div>
+          <div><dt className="font-semibold">Current equipment status</dt><dd><StatusBadge status={currentStatus} /></dd></div>
           <div>
             <dt className="font-semibold">Borrower</dt>
             <dd>{borrower.name ?? "Borrower name unavailable"}</dd>
@@ -106,7 +107,7 @@ export default function HandoverDetails({ reservationId }: { reservationId: stri
       {handover ? (
         <section role="status" aria-labelledby="handover-complete" className="rounded-xl border border-green-300 bg-white p-5">
           <h2 id="handover-complete" className="text-xl font-semibold text-slate-950">Handover complete</h2>
-          <p className="mt-2 text-slate-700">Equipment status: {currentStatus}</p>
+          {completionStatus && <p className="mt-2 text-slate-700">Equipment status at handover: {completionStatus}</p>}
           <p className="mt-1 text-slate-700">Borrower: {borrower.name ?? "Borrower name unavailable"}</p>
           <p className="mt-1 text-slate-700">Due: {formatDate(handover.dueDate)}</p>
           {handover.universityIdVerifiedAt && <p className="mt-1 text-slate-700">University ID checked in person: {formatDate(handover.universityIdVerifiedAt)}</p>}
