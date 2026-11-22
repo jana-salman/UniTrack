@@ -20,6 +20,8 @@ export async function getCatalogue(
             i.name,
             c.name AS category,
             i.status,
+            i.is_restricted AS "isRestricted",
+            EXISTS (SELECT 1 FROM public.kits k WHERE k.item_id = i.id) AS "isKit",
             NULL::text AS "expectedReturn"
        FROM equipment_items i
        JOIN equipment_categories c ON c.id = i.category_id

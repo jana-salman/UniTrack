@@ -3,14 +3,8 @@
 // unitrack_equipment_service, after migrations 003-006 and the S2-09 migration.
 // All rows below are synthetic and created by this file.
 //
-// SYNTHETIC PERMISSION: beforeAll applies database/local-test/
-// SYNTHETIC_s2-01_reservation_status_grant.sql (GRANT UPDATE (status) ON
-// reservations TO unitrack_loans_service), a stand-in for LJ's future S2-01
-// migration so handover can mark reservations fulfilled. These tests verify
-// S2-09 against that stand-in ONLY; they do not verify LJ's final migration.
 // "cancelUnderContract" below is likewise a reference sketch of the PROPOSED
 // coordination contract, not LJ's implementation.
-import { readFileSync } from "node:fs";
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { isEligibleBorrower, type UserIdentity } from "@unitrack/contracts";
@@ -33,7 +27,7 @@ import { getHandoverDetails } from "../lib/handover/queries";
 import { LoansError } from "../lib/errors";
 import { confirmReturn } from "../lib/returns/service";
 
-const expectedDatabaseUrl = "postgresql://unitrack_local_test:local_test_only@127.0.0.1:55432/unitrack_test";
+const expectedDatabaseUrl = "postgresql://unitrack_local_test:local_test_only@127.0.0.1:55433/unitrack_test";
 const configuredDatabaseUrl = process.env.UNITRACK_TEST_DATABASE_URL;
 const localDescribe = configuredDatabaseUrl ? describe.sequential : describe.skip;
 
@@ -123,15 +117,14 @@ async function submit(reservation: string, input: Record<string, unknown>, as: U
   // The assistant's physical university-ID check is ticked unless a test overrides it.
   return confirmHandover(reservation, { checklistVersion, universityIdVerified: true, ...input }, as, ports);
 }
-const SYNTHETIC_GRANT = readFileSync(new URL("../../../database/local-test/SYNTHETIC_s2-01_reservation_status_grant.sql", import.meta.url), "utf8");
-/** SYNTHETIC stand-in for LJ's S2-01 UPDATE (status) grant (see file header). */
-const grantSyntheticStatus = () => admin.query(SYNTHETIC_GRANT);
-const revokeSyntheticStatus = () => admin.query("REVOKE UPDATE (status) ON public.reservations FROM unitrack_loans_service");
+/** The combined harness applies LJ's real S2-01 migration; this restores its exact column grant after deliberate revocation tests. */
+const grantReservationStatus = () => admin.query("GRANT UPDATE (status) ON public.reservations TO unitrack_loans_service");
+const revokeReservationStatus = () => admin.query("REVOKE UPDATE (status) ON public.reservations FROM unitrack_loans_service");
 const reservationRow = async (reservation: string) => (await admin.query<{ status: string; state: string | null }>(
   "select status, handover_operation ->> 'state' as state from public.reservations where id = $1", [reservation])).rows[0];
 /**
  * REFERENCE SKETCH of the PROPOSED cancellation contract (docs/handover-s2-09.md),
- * run as the restricted Loans role with the synthetic grant. Not LJ's code.
+ * run as the restricted Loans role with the S2-01 permission installed. Not LJ's code.
  * Same lock order as handover: item lock, then reservation row; cancel only a
  * confirmed reservation with no loan and no unfinished/completed handover.
  */
@@ -171,7 +164,7 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     equipmentPool = restricted("unitrack_equipment_service");
     usersPool = restricted("unitrack_users_service");
     database.pool = loansPool;
-    await grantSyntheticStatus();
+    expect(await admin.query("SELECT has_column_privilege('unitrack_loans_service', 'public.reservations', 'status', 'UPDATE') AS allowed")).toMatchObject({ rows: [{ allowed: true }] });
     // Synthetic fixtures owned by this test file (fresh tmpfs container each run).
     await admin.query("insert into auth.users (id) values ($1), ($2), ($3), ($4), ($5) on conflict do nothing", [assistantId, borrowerId, inactiveBorrowerId, otherAssistantId, otherLabStudentId]);
     await admin.query("insert into public.labs (id, code, name) overriding system value values ($1, 'S2-09-TEST', 'Disposable Handover Lab'), ($2, 'S2-09-OTHER', 'Other Disposable Lab') on conflict do nothing", [labId, otherLabId]);
@@ -508,10 +501,10 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     await expect(loansPool.query("update public.condition_records set notes = 'edited' where loan_id = $1", [loan.id])).rejects.toMatchObject({ code: "42501" });
     await expect(loansPool.query("delete from public.condition_records where loan_id = $1", [loan.id])).rejects.toMatchObject({ code: "42501" });
     await expect(loansPool.query("delete from public.loans where id = $1", [loan.id])).rejects.toMatchObject({ code: "42501" });
-    // The S2-09 migration ALONE grants no reservation status update (the synthetic S2-01 stand-in is removed for this check).
-    await revokeSyntheticStatus();
+    // Remove LJ's real S2-01 status grant to verify restricted-role denial, then restore it.
+    await revokeReservationStatus();
     try { await expect(loansPool.query("update public.reservations set status = 'cancelled' where id = $1", [reservations.tc34])).rejects.toMatchObject({ code: "42501" }); }
-    finally { await grantSyntheticStatus(); }
+    finally { await grantReservationStatus(); }
     await expect(loansPool.query("insert into public.loans (item_id, borrower_id, lab_id, due_date) values ($1, $2, $3, now() + interval '1 day')", [items.tc35, borrowerId, labId])).rejects.toMatchObject({ code: "42501" });
     // RLS: a confirmed loan without the assistant's ID check is refused too.
     await expect(loansPool.query("insert into public.loans (item_id, borrower_id, lab_id, due_date, student_confirmed_at) values ($1, $2, $3, now() + interval '1 day', now())", [items.tc35, borrowerId, labId])).rejects.toMatchObject({ code: "42501" });
@@ -522,10 +515,10 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
 
   it("fulfilment refused in the final transaction (status permission removed after checkout): loan and pickup records roll back with it; checkout undone; then cancellation may resume", async () => {
     const item = items.fulfilRevoke, reservation = reservations.fulfilRevoke;
-    hooks.afterApply = async () => { await revokeSyntheticStatus(); };
+    hooks.afterApply = async () => { await revokeReservationStatus(); };
     try {
       await expect(submit(reservation, { studentConfirmed: true, conditions: kitChecklist(item) })).rejects.toMatchObject({ status: 503, code: "handover_rolled_back" });
-    } finally { await grantSyntheticStatus(); }
+    } finally { await grantReservationStatus(); }
     expect(await reservationRow(reservation)).toEqual({ status: "confirmed", state: "compensated" });
     expect(await loansFor(reservation)).toHaveLength(0);
     expect((await admin.query("select count(*)::int as n from public.condition_records where item_id = $1", [item])).rows[0].n).toBe(0);
@@ -537,7 +530,7 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     expect((await reservationRow(reservation)).status).toBe("cancelled");
   });
 
-  it("final COMMIT fails (SYNTHETIC deferred fault trigger): no fulfilled reservation without its loan and records; outcome uncertain; recovery fulfils all together", async () => {
+  it("final COMMIT fails (test-only deferred fault trigger): no fulfilled reservation without its loan and records; outcome uncertain; recovery fulfils all together", async () => {
     const item = items.commitFault, reservation = reservations.commitFault;
     // Test-only fault injection: raises at COMMIT, after the loan, pickup records and fulfilment were written.
     await admin.query(`create or replace function public.s209_test_commit_fault() returns trigger language plpgsql as $$
@@ -568,10 +561,10 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
   });
 
   it("without the S2-01 status permission (S2-09 migration alone): 503 before any plan or Equipment change", async () => {
-    await revokeSyntheticStatus();
+    await revokeReservationStatus();
     try {
       await expect(submit(reservations.noGrant, { studentConfirmed: true, conditions: kitChecklist(items.noGrant) })).rejects.toMatchObject({ status: 503, code: "reservation_fulfillment_unavailable" });
-    } finally { await grantSyntheticStatus(); }
+    } finally { await grantReservationStatus(); }
     expect(await reservationRow(reservations.noGrant)).toEqual({ status: "confirmed", state: null });
     expect(await itemStatus(items.noGrant)).toBe("reserved");
     expect((await admin.query("select count(*)::int as n from public.equipment_status_history where item_id = $1", [items.noGrant])).rows[0].n).toBe(0);

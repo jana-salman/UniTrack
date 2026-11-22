@@ -1,8 +1,8 @@
 # Manual S2-09 handover testing on a DISPOSABLE local PostgreSQL (never Supabase).
 #   -Action Setup     start container, apply 003-006 + S2-02 + C430PRJCT-40 +
 #                     007 in production order, verify the combined permissions,
-#                     apply the SYNTHETIC S2-01 status grant (stand-in, not LJ's
-#                     migration), create restricted service logins, and load the
+#                     apply S2-05 and LJ's real S2-01 permissions/status guards,
+#                     create restricted service logins, and load the
 #                     synthetic browser fixture
 #   -Action Run       start ONE service with its own restricted DATABASE_URL;
 #                     the terminal's previous values are restored on exit
@@ -53,19 +53,21 @@ switch ($Action) {
     Invoke-Psql @('--quiet', '--file', '/workspace/database/migrations/007_custody_record_protection.sql') 'Migration 007 custody protection'
     Invoke-Psql @('--file', '/workspace/database/local-test/verify_007.sql') 'Migration 007 verification'
     Invoke-Psql @('--file', '/workspace/database/local-test/verify_C430PRJCT-40.sql') 'S2-09 verification after 007'
-    # SYNTHETIC stand-in for LJ's S2-01 UPDATE (status) grant (handover marks the
-    # reservation fulfilled). Local only; not her migration. See the file header.
-    Invoke-Psql @('--file', '/workspace/database/local-test/SYNTHETIC_s2-01_reservation_status_grant.sql') 'SYNTHETIC S2-01 status grant'
+    Invoke-Psql @('--file', '/workspace/database/migrations/S2-05_kit_management.sql') 'Migration S2-05'
+    Invoke-Psql @('--file', '/workspace/database/local-test/verify_S2-05.sql') 'S2-05 verification'
+    Invoke-Psql @('--file', '/workspace/database/migrations/S2-01_reservation_permissions.sql') 'Migration S2-01 permissions'
+    Invoke-Psql @('--file', '/workspace/database/local-test/verify_S2-01.sql') 'S2-01 verification'
+    Invoke-Psql @('--file', '/workspace/database/migrations/S2-01_reservation_status_protection.sql') 'C3/C4 status protection'
+    Invoke-Psql @('--file', '/workspace/database/local-test/verify_S2-01_status_protection.sql') 'C3/C4 verification'
     Invoke-Psql @('--file', '/workspace/database/local-test/manual_service_logins.sql') 'Restricted service logins'
     Invoke-Psql @('--set', "assistant_id=$AssistantId", '--set', "assistant_email=$AssistantEmail",
       '--file', '/workspace/database/local-test/handover_manual_fixture.sql') 'Synthetic handover fixture'
     # Prove the restricted Loans LOGIN can mark reservations fulfilled, and nothing broader.
     Invoke-Psql @('--file', '/workspace/database/local-test/manual_fulfilment_permission_check.sql') 'Fulfilment permission check'
-    Write-Host 'NOTE: reservation fulfilment uses the SYNTHETIC local stand-in grant (UPDATE (status) on reservations), not LJ''s S2-01 migration.'
     Push-Location $repositoryRoot
     try { npm run build:packages; if ($LASTEXITCODE -ne 0) { throw 'Shared package build failed.' } }
     finally { Pop-Location }
-    Write-Host 'Setup complete. Start each service in its own terminal with -Action Run -Service users|equipment|loans.'
+    Write-Host 'Setup complete. The real S2-01 grant and C3/C4 guards are installed. Start each service in its own terminal with -Action Run -Service users|equipment|loans.'
   }
   'Run' {
     if (-not $Service) { throw 'Pass -Service users, equipment or loans.' }

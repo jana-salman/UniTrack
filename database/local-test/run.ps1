@@ -1,12 +1,15 @@
 [CmdletBinding()]
-param()
+param([switch]$KeepDatabase)
 
 $ErrorActionPreference = 'Stop'
 $composeFile = Join-Path $PSScriptRoot 'compose.yaml'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$projectName = 'unitrack-migration-test'
-$databaseUrl = 'postgresql://unitrack_local_test:local_test_only@127.0.0.1:55432/unitrack_test'
+$projectName = 'unitrack-sprint2-verification'
+$databaseUrl = 'postgresql://unitrack_local_test:local_test_only@127.0.0.1:55433/unitrack_test'
 $containerStarted = $false
+$runSucceeded = $false
+$previousComposeTestPort = $env:UNITRACK_LOCAL_TEST_PORT
+$env:UNITRACK_LOCAL_TEST_PORT = '55433'
 
 function Assert-LastExitCode([string]$step) {
   if ($LASTEXITCODE -ne 0) {
@@ -19,9 +22,8 @@ function Invoke-PsqlFile([string]$path, [string]$step) {
     --dbname unitrack_test --file $path
   Assert-LastExitCode $step
 }
-
 try {
-  Write-Host 'Starting disposable PostgreSQL on 127.0.0.1:55432...'
+  Write-Host 'Starting isolated disposable PostgreSQL on 127.0.0.1:55433...'
   # Request cleanup before startup so a partial create/start failure cannot
   # leave this explicitly named local project behind.
   $containerStarted = $true
@@ -76,10 +78,20 @@ try {
 
   Write-Host 'Verifying migration 007 custody protection locally...'
   Invoke-PsqlFile '/workspace/database/local-test/verify_007.sql' 'Migration 007 verification'
+  Write-Host 'Re-verifying C430PRJCT-40 after final custody restrictions and before S2-01 adds its separate reservation grant...'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_C430PRJCT-40.sql' 'C430PRJCT-40 after migration 007 verification'
 
-  Write-Host 'Re-verifying C430PRJCT-40 after final custody restrictions...'
-  Invoke-PsqlFile '/workspace/database/local-test/verify_C430PRJCT-40.sql' 'Combined C430PRJCT-40 and migration 007 verification'
+  Write-Host 'Applying S2-05 kit integrity and reservation resource migration locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/S2-05_kit_management.sql' 'Migration S2-05'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_S2-05.sql' 'Migration S2-05 verification'
 
+  Write-Host 'Applying and verifying the staged S2-01 reservation permissions locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/S2-01_reservation_permissions.sql' 'Migration S2-01'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_S2-01.sql' 'Migration S2-01 verification'
+
+  Write-Host 'Applying and verifying C3/C4 reservation status protection locally...'
+  Invoke-PsqlFile '/workspace/database/migrations/S2-01_reservation_status_protection.sql' 'Reservation status protection migration'
+  Invoke-PsqlFile '/workspace/database/local-test/verify_S2-01_status_protection.sql' 'Reservation status protection verification'
   Push-Location $repositoryRoot
   try {
     Write-Host 'Building shared workspace packages used by the integration tests...'
@@ -94,9 +106,17 @@ try {
     $env:UNITRACK_TEST_DATABASE_URL = $databaseUrl
     try {
       Write-Host 'Running real PostgreSQL Equipment/Loans integration tests...'
+      npm test --workspace=@unitrack/equipment -- --run tests/postgres-kits.integration.test.ts
+      Assert-LastExitCode 'PostgreSQL kit integration test'
+
       npm test --workspace=@unitrack/loans -- --run tests/postgres-migrations.integration.test.ts
       Assert-LastExitCode 'PostgreSQL microservice integration test'
 
+      npm test --workspace=@unitrack/loans -- --run tests/postgres-reservations.integration.test.ts
+      Assert-LastExitCode 'PostgreSQL reservation integration test'
+
+      npm test --workspace=@unitrack/loans -- --run tests/postgres-reservation-status-guard.integration.test.ts
+      Assert-LastExitCode 'PostgreSQL reservation status guard integration test'
       Write-Host 'Running real PostgreSQL handover (C430PRJCT-40) integration tests as restricted service roles...'
       npm test --workspace=@unitrack/loans -- --run tests/postgres-handover.integration.test.ts
       Assert-LastExitCode 'PostgreSQL handover integration test'
@@ -114,11 +134,22 @@ try {
     Pop-Location
   }
 
-  Write-Host 'PASS: migrations 003-007, S2-02 and C430PRJCT-40, plus the focused microservice integration checks, passed locally.'
+  Write-Host 'PASS: migrations 003-007, S2-01, S2-02, S2-05, S2-09 and S2-13 custody, plus reservation, kit, return, handover and C3/C4 status-guard integration checks, passed locally.'
+  $runSucceeded = $true
 }
 finally {
-  if ($containerStarted) {
+  if ($containerStarted -and $KeepDatabase -and $runSucceeded) {
+    Write-Host 'Keeping the disposable PostgreSQL container running for local browser acceptance.'
+    Write-Host 'After testing, run: docker compose --project-name unitrack-sprint2-verification --file .\database\local-test\compose.yaml down --volumes --remove-orphans'
+  }
+  elseif ($containerStarted) {
     Write-Host 'Removing the disposable PostgreSQL container and temporary data...'
     docker compose --project-name $projectName --file $composeFile down --volumes --remove-orphans
+  }
+  if ($null -eq $previousComposeTestPort) {
+    Remove-Item Env:UNITRACK_LOCAL_TEST_PORT -ErrorAction SilentlyContinue
+  }
+  else {
+    $env:UNITRACK_LOCAL_TEST_PORT = $previousComposeTestPort
   }
 }

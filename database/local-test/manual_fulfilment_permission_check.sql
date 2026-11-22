@@ -1,22 +1,21 @@
 -- DISPOSABLE LOCAL DATABASE ONLY (never Supabase). Run by handover-manual.ps1
--- -Action Setup AFTER SYNTHETIC_s2-01_reservation_status_grant.sql,
+-- -Action Setup after the actual S2-01 and S2-09 migrations, and after
 -- manual_service_logins.sql and handover_manual_fixture.sql.
 --
--- Proves that the browser services' restricted LOGIN accounts can perform the
--- handover's fulfilment and nothing broader:
---   * unitrack_loans_local inherits UPDATE (status) on reservations from the
---     SYNTHETIC stand-in grant to unitrack_loans_service (it is a LOGIN INHERIT
---     member of that group, see manual_service_logins.sql);
+-- Proves that the browser services' restricted LOGIN accounts have only the
+-- approved reservation grants needed by the handover:
+--   * unitrack_loans_local inherits the narrow UPDATE (status) grant from
+--     LJ's S2-01 migration (it is a LOGIN INHERIT member of the group);
 --   * no table-level UPDATE and no other reservation column is updatable;
 --   * the Users and Equipment logins cannot update reservation status;
---   * the exact handover statement works as that login (rolled back).
--- The grant is a local stand-in for LJ's S2-01 migration, NOT that migration.
+-- C3/C4 require a real completed handover for a fulfilled transition, so this
+-- verifier checks privileges only and does not synthesize a status update.
 \set ON_ERROR_STOP on
 DO $$
 BEGIN
   IF NOT has_column_privilege('unitrack_loans_local', 'public.reservations', 'status', 'UPDATE')
      OR NOT has_column_privilege('unitrack_loans_local', 'public.reservations', 'handover_operation', 'UPDATE') THEN
-    RAISE EXCEPTION 'Manual setup: the Loans login cannot mark reservations fulfilled (synthetic grant missing?)';
+    RAISE EXCEPTION 'Manual setup: the Loans login lacks the S2-01/S2-09 column grants';
   END IF;
   IF has_table_privilege('unitrack_loans_local', 'public.reservations', 'UPDATE')
      OR has_table_privilege('unitrack_loans_local', 'public.reservations', 'INSERT')
@@ -28,26 +27,9 @@ BEGIN
      OR has_column_privilege('unitrack_loans_local', 'public.reservations', 'lab_id', 'UPDATE')
      OR has_column_privilege('unitrack_equipment_local', 'public.reservations', 'status', 'UPDATE')
      OR has_column_privilege('unitrack_users_local', 'public.reservations', 'status', 'UPDATE') THEN
-    RAISE EXCEPTION 'Manual setup: reservation permissions are broader than the synthetic stand-in';
+    RAISE EXCEPTION 'Manual setup: reservation permissions are broader than the approved column grants';
   END IF;
 END;
 $$;
 
--- The handover's fulfilment statement, as the restricted Loans login (rolled back).
-BEGIN;
-SET LOCAL ROLE unitrack_loans_local;
-DO $$
-DECLARE
-  changed integer;
-BEGIN
-  UPDATE public.reservations SET status = 'fulfilled', handover_operation = handover_operation
-  WHERE id = (SELECT id FROM public.reservations WHERE status = 'confirmed' ORDER BY id LIMIT 1);
-  GET DIAGNOSTICS changed = ROW_COUNT;
-  IF changed <> 1 THEN
-    RAISE EXCEPTION 'Manual setup: the Loans login could not run the fulfilment update (RLS?)';
-  END IF;
-END;
-$$;
-ROLLBACK;
-
-SELECT 'PASS: Loans login can mark reservations fulfilled via the SYNTHETIC local stand-in grant (not LJ''s migration)' AS result;
+SELECT 'PASS: Loans login inherits the narrow reservation grants from the actual S2-01 and S2-09 migrations' AS result;

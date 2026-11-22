@@ -249,6 +249,11 @@ were 26/26. The runner builds the current shared contracts first, so its
 
 What that run does and does not prove:
 
+This subsection records the 2026-11-19 pre-integration run and is retained as
+historical evidence. The combined harness below/currently in
+`database/local-test/run.ps1` supersedes its synthetic-grant limitation by
+applying LJ's real S2-01 migration.
+
 - **Real integration evidence:** S2-02's exclusion constraint (LJ's actual
   migration) together with this migration and the handover service on real
   PostgreSQL: overlapping confirmed inserts and promotions are refused with
@@ -451,7 +456,7 @@ The fulfilment rule is compatible with handover because T2 inserts the loan and
 pickup records before the status update in the same transaction. Every rule
 needs explicit verification in S2-01's own script plus restricted-role tests.
 
-### Minimal grant / RLS for fulfilment — dependency on LJ
+### Minimal grant / RLS for fulfilment — integrated
 
 - **Needed:** exactly `GRANT UPDATE (status) ON public.reservations TO
   unitrack_loans_service;` — no table-level grant, no other column, no other
@@ -464,20 +469,19 @@ needs explicit verification in S2-01's own script plus restricted-role tests.
   `RESTRICTIVE` policy or the trigger above, and must still allow handover's
   `confirmed → fulfilled` update and its `handover_operation` updates on
   `confirmed` rows.
-- **Not in the S2-09 migration** (LJ owns reservation-write permissions; no
-  duplication, no broadening). `verify_C430PRJCT-40.sql` still asserts that the
-  S2-09 migration alone grants no status update.
-- **Until LJ's grant exists, no handover can complete on any database.** Loans
-  refuses at plan time with 503 `reservation_fulfillment_unavailable` ("Handover
-  is not available yet: reservations cannot be marked fulfilled. Nothing was
-  changed.") before any plan, Users or Equipment call; the page shows it as a
-  definite failure, not an uncertain one. If the grant disappears after
-  checkout, T2 rolls back and the checkout is undone (`handover_rolled_back`).
-  **Deployment order:** LJ's migration before (or with) enabling S2-09.
-- **Local tests only:** `database/local-test/SYNTHETIC_s2-01_reservation_status_grant.sql`
-  contains just that grant and is applied by the PostgreSQL handover test and
-  `handover-manual.ps1`. It is a clearly marked stand-in, **not** LJ's migration;
-  passing tests with it does not verify her migration.
+- This remains outside the S2-09 migration: S2-01 owns the narrow reservation
+  INSERT policy and `UPDATE (status)` grant; S2-09 owns the separate
+  `handover_operation` privilege and policy. The local verifier checks S2-09's
+  grant set before S2-01 runs. The combined harness then applies and verifies
+  the real S2-01 migration and C3/C4 guard.
+- The handover PostgreSQL suite and manual fixture now use the actual S2-01
+  migration. They verify its status grant under restricted Loans roles and
+  temporarily revoke/regrant only that column privilege for negative-path
+  checks. `SYNTHETIC_s2-01_reservation_status_grant.sql` is an obsolete
+  historical artifact and is not used by any runner, test, or fixture setup.
+- Deployment order: S2-09 schema, 007 custody protections, S2-05 resources,
+  S2-01 reservation permissions, then C3/C4 status protections, before
+  enabling the combined application.
 
 ### Return and pickup-lookup compatibility
 
@@ -607,9 +611,8 @@ the deferred final-return invariant together.
 - `services/loans/lib/errors.ts`: adds `handoverUncertain()`.
 - `database/local-test/run.ps1`: additive steps for this migration and test,
   merged with S2-02's steps (see "S2-02"); `handover-manual.ps1` applies S2-02.
-- `database/local-test/SYNTHETIC_s2-01_reservation_status_grant.sql`: test-only
-  stand-in for LJ's status grant (used by the handover PostgreSQL test and the
-  manual harness; never a migration).
+- The original synthetic status-grant SQL file is retained only as historical
+  context; no current test or local setup applies it.
 - `apps/web/lib/handover-view.ts`: `reservation_fulfillment_unavailable` is a
   definite (not uncertain) failure.
 - No navigation, login, seed, Return, reservation, scan or lookup changes.
@@ -618,18 +621,17 @@ the deferred final-return invariant together.
 
 `database/local-test/handover-manual.ps1 -Action Setup -AssistantId <your
 Supabase user ID> -AssistantEmail <your email>` starts a local container, applies
-003-006, S2-02, this migration, and 007 in production order, verifies S2-09
-before and after 007, and creates `unitrack_{users,equipment,loans}_local`
+003-006, S2-02, this migration, 007, S2-05, S2-01 permissions and the C3/C4
+guard in dependency order, verifies each migration, and creates
+`unitrack_{users,equipment,loans}_local`
 LOGIN accounts that only inherit their 006 group roles
 (`manual_service_logins.sql`), and loads `handover_manual_fixture.sql`. Then run
 `-Action Run -Service users|equipment|loans` in three terminals. Setup also
-applies the SYNTHETIC S2-01 status grant (to `unitrack_loans_service`; the
-`unitrack_loans_local` login inherits it) so the handover can mark the
-reservation fulfilled, then runs `manual_fulfilment_permission_check.sql`: the
-Loans login must be able to run the fulfilment update (rolled back) and must
-have nothing broader (no table-level UPDATE, no date/item/borrower/lab column,
-nothing for the Users/Equipment logins). This stand-in is local only and is not
-LJ's migration (see "Minimal grant / RLS for fulfilment"). Setup refuses to
+applies LJ's actual S2-01 migration (the restricted login inherits its narrow
+column grant), then runs `manual_fulfilment_permission_check.sql` to verify the
+approved grants and absence of table-level or unrelated column permissions.
+The check does not attempt a synthetic fulfilment update that would bypass C3/C4.
+Setup refuses to
 reuse any existing manual container, running or stopped: each service
 connects with its OWN restricted account (never the container superuser), and the
 script restores the terminal's `DATABASE_URL`/`LOANS_DATABASE_SESSION_AFFINITY`
