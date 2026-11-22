@@ -175,7 +175,7 @@ export default function CategoryManagementClient() {
       </section>
 
       {/* Create category */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="max-w-3xl rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="mb-5 text-xl font-semibold text-slate-900">
           Create New Category
         </h2>

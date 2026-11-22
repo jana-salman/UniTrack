@@ -30,7 +30,6 @@
   --muted: #514944;
   --brand: #800020;
   --gutter: clamp(1rem, 2.5vw, 2.3rem);
-  --sidebar-width: clamp(12.25rem, 17vw, 16.25rem);
 }
 
 html { min-height: 100%; }
@@ -93,7 +92,7 @@ body {
 .workspace-shell {
   display: grid;
   min-height: 100dvh;
-  grid-template: "skip skip" auto "header header" auto "sidebar content" 1fr / var(--sidebar-width) minmax(0, 1fr);
+  grid-template: "skip" auto "header" auto "content" 1fr / minmax(0, 1fr);
 }
 
 .institutional-header {
@@ -112,20 +111,18 @@ body {
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  gap: clamp(.65rem, 2.2vw, 2rem);
+  gap: clamp(.65rem, 1.3vw, 1.2rem);
   color: var(--ink);
 }
 
 .brand img {
-  width: clamp(7.6rem, 15.3vw, 14.5rem);
+  width: clamp(5.6rem, 12vw, 11.75rem);
   height: auto;
 }
 
 .brand-wordmark {
   display: grid;
   gap: .2rem;
-  padding: .22rem 0 .22rem clamp(.65rem, 2.2vw, 2rem);
-  border-left: 1px solid var(--line);
   line-height: 1.15;
 }
 
@@ -135,6 +132,16 @@ body {
 }
 
 .brand-wordmark > span { font-size: clamp(.78rem, 1.25vw, 1.04rem); }
+
+.workspace-header { position: relative; z-index: 1; }
+
+.workspace-header-start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem clamp(.65rem, 2vw, 1.75rem);
+  min-width: 0;
+}
 
 .workspace-account {
   display: flex;
@@ -187,34 +194,36 @@ body {
   font-weight: 700;
 }
 
-.workspace-menu {
-  grid-area: sidebar;
-  display: flex;
-  min-width: 0;
-  border-right: 1px solid var(--line);
-  background: var(--sidebar);
+.menu-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  border: 1px solid var(--line);
 }
 
-.menu-toggle { display: none; }
-
 .workspace-menu-panel {
-  display: flex;
-  width: 100%;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 2rem;
-  padding-block: 2rem 1.25rem;
+  position: absolute;
+  inset-block-start: calc(100% + .35rem);
+  inset-inline-start: var(--gutter);
+  width: min(19rem, calc(100% - 2 * var(--gutter)));
+  max-height: min(27rem, 65dvh);
+  overflow: auto;
+  padding: .5rem;
+  border: 1px solid var(--line);
+  border-radius: .65rem;
+  background: var(--paper);
+  box-shadow: 0 .3rem 1rem #302c2920;
 }
 
 .workspace-menu ul { display: grid; gap: .35rem; }
 
 .workspace-menu a {
   display: flex;
-  min-height: 3.15rem;
+  min-height: 2.75rem;
   align-items: center;
   gap: .85rem;
   border-radius: .28rem;
-  padding: .5rem clamp(.9rem, 2vw, 2rem);
+  padding: .5rem .8rem;
   font-size: 1.05rem;
 }
 
@@ -232,8 +241,8 @@ body {
   display: flex;
   align-items: center;
   gap: .65rem;
-  margin-inline: var(--gutter);
-  padding-top: 1rem;
+  margin: .5rem .35rem 0;
+  padding: .65rem .45rem .2rem;
   border-top: 1px solid var(--line);
 }
 
@@ -241,6 +250,8 @@ body {
   grid-area: content;
   display: flex;
   min-width: 0;
+  width: min(100%, 90rem);
+  margin-inline: auto;
   flex-direction: column;
   padding: clamp(1.25rem, 2vw, 2rem) var(--gutter) 1rem;
 }
@@ -398,22 +409,18 @@ body {
 .public-panel h1 { font-size: clamp(1.75rem, 3vw, 2.3rem); }
 .public-shell .site-footer { margin: 0 var(--gutter) 1rem; }
 
+@media (min-width: 45rem) {
+  .workspace-menu { position: relative; }
+  .workspace-menu-panel { inset-inline-start: 0; width: 19rem; }
+}
+
 @media (max-width: 68rem) {
   .catalogue-card-heading { grid-template-columns: auto minmax(0, 1fr); }
   .catalogue-status { grid-column: 2; text-align: left; }
 }
 
-@media (max-width: 54rem) {
-  .workspace-shell { grid-template: "skip" auto "header" auto "sidebar" auto "content" 1fr / minmax(0, 1fr); }
-  .workspace-menu { display: block; border-right: 0; border-bottom: 1px solid var(--line); }
-  .menu-toggle { display: flex; align-items: center; gap: .55rem; margin: .25rem var(--gutter); }
-  .workspace-menu-panel { display: none; padding: .2rem var(--gutter) .85rem; gap: .6rem; }
-  .workspace-menu-panel[data-open="true"] { display: flex; }
-  .workspace-menu a { min-height: 2.75rem; }
-  .workspace-lab { margin-inline: 0; padding-top: .65rem; }
-}
-
 @media (max-width: 39rem) {
+  .brand img { width: clamp(5.6rem, 26vw, 7rem); }
   .workspace-account { width: 100%; justify-content: space-between; padding-top: .25rem; border-top: 1px solid var(--color-slate-200); font-size: .9rem; }
   .workspace-account form { border-left: 0; padding-left: 0; }
   .catalogue-filters, .catalogue-grid { grid-template-columns: minmax(0, 1fr); }

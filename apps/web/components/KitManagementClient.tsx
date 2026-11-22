@@ -112,7 +112,7 @@ export default function KitManagementClient() {
       <PageHeading title="Kit management" section="Kits" description="Create kits and manage their tracked components." />
       {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-red-800">{error}</p>}
       {success && <p role="status" className="rounded-lg bg-green-50 p-3 text-green-800">{success}</p>}
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="max-w-4xl rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="text-lg font-semibold">Create a kit</h2>
         <form className="mt-4 grid gap-4 sm:grid-cols-2" onSubmit={create}>
           <label className="text-sm font-medium">Main QR / asset code<input className={input} name="asset_code" required maxLength={50} /></label>
@@ -123,7 +123,7 @@ export default function KitManagementClient() {
           <button disabled={busy} className="min-h-11 rounded-lg bg-aub-700 px-4 font-semibold text-white disabled:opacity-50 sm:col-span-2">{busy ? "Saving…" : "Create kit"}</button>
         </form>
       </section>
-      <section className="space-y-4"><h2 className="text-lg font-semibold">Existing kits</h2>
+      <section className="max-w-5xl space-y-4"><h2 className="text-lg font-semibold">Existing kits</h2>
         {!kits.length && <p className="text-slate-600">No kits have been created for this laboratory.</p>}
         {kits.map(kit => {
           const active = kit.components.filter(component => component.is_active);

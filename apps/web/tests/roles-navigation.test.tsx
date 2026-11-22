@@ -38,6 +38,9 @@ describe("roles and navigation", () => {
     expect(markup).toContain('href="/dashboard"');
     expect(markup).toContain(roleLabel(role));
     expect(markup).toContain("Laboratory 7");
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('aria-controls="workspace-menu-panel"');
+    expect(markup).toMatch(/id="workspace-menu-panel"[^>]+hidden=""/);
     expect(markup).toMatch(/href="\/catalogue" aria-current="page"|aria-current="page" href="\/catalogue"/);
     expect(markup.match(/aria-label="Primary navigation"/g)).toHaveLength(1);
 

@@ -8,8 +8,11 @@ export function AppNavigation({ profile }: { profile: Profile }) {
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to content</a>
-      <header className="institutional-header">
-        <Brand href="/dashboard" />
+      <header className="institutional-header workspace-header">
+        <div className="workspace-header-start">
+          <Brand href="/dashboard" />
+          <WorkspaceMenu links={workspaceLinks(profile.role)} labId={profile.lab_id} />
+        </div>
         <div className="workspace-account">
           <div className="account-identity">
             <strong>{profile.full_name}</strong>
@@ -20,7 +23,6 @@ export function AppNavigation({ profile }: { profile: Profile }) {
           </form>
         </div>
       </header>
-      <WorkspaceMenu links={workspaceLinks(profile.role)} labId={profile.lab_id} />
     </>
   );
 }

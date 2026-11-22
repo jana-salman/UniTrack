@@ -126,7 +126,7 @@ export default function EquipmentCreationClient() {
       <PageHeading title="Manage equipment" section="Equipment" description="Register equipment and update records in your laboratory." />
       <h2 className="mb-3 text-xl font-semibold">Add equipment</h2>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="max-w-4xl rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="grid gap-5 md:grid-cols-2">
             <div>
