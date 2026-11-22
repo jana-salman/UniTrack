@@ -31,7 +31,8 @@
 | Left drawer and logo refinement | PASS | Focused navigation tests, Web lint and typecheck, plus Edge fixture checks at 1440, 375, and 320 pixels. Verified button and brand order, no overlap, the left-edge rectangle, active styling, Escape and focus restoration, outside click, and closing on selection. |
 | Synthetic QR camera | PASS | Chromium decoded a prerecorded QR stream and stopped the scanner. |
 | Real Professor acceptance | PASS | Confirmed Professor session in the controlled Edge InPrivate window. Role navigation, catalogue filtering, successful and no-match lookup (HTTP 200 and 404), and manual UUID input passed. Assistant scan controls and manager navigation were absent. The direct manager route displayed Access denied, and the student return-problems API returned HTTP 403. |
-| Live normal custody scenario | BLOCKED | The test asset is approved. The controlled Edge InPrivate window is awaiting the designated Student sign-in. No reservation, handover, or return was submitted. |
+| Live Student reservation | FAIL | Verified the designated Student in Laboratory 1 and the approved `TEST-DRONE-001` card. On 22 November 2026, the app submitted twice for same-day pickup, with attempted starts at 20:50 and 20:51 Beirut time and an exclusive end at 00:00 on 23 November. Both Web and Loans returned HTTP 503. Equipment item and component reads returned HTTP 200 before the failed save. The UI showed “Reservation could not be saved. Try again.” No pickup window was confirmed. |
+| Live normal handover and return | BLOCKED | Awaiting a confirmed reservation and an eligible pickup window. The browser remains on the Student step. |
 | Live problematic return and manager acceptance | BLOCKED | The problematic return follows a successful normal scenario and requires a separate valid, non-overlapping pickup window. Manager acceptance requires a designated manager. |
 | Physical-device camera and deployed acceptance | NOT RUN | Desktop Chromium emulated mobile viewports and camera input. |
 
@@ -51,6 +52,6 @@ The authenticated screenshots contain synthetic profiles and equipment.
 
 **NOT READY for live acceptance.** Provide the following for the remaining checks.
 
-- Sign in as the designated Student in the controlled Edge InPrivate window. Use the approved asset for a fresh normal reservation, then switch to the same-lab Lab Assistant at the eligible pickup time.
+- Resolve the live reservation save failure for the approved asset. Switch to the same-lab Lab Assistant only after the normal reservation is confirmed and its pickup window opens.
 - Check for a second valid, non-overlapping window only after the normal return is complete. A designated Lab Manager is needed for live manager checks.
 - Provide a physical phone and QR label for device acceptance, and an accessible deployed URL if deployed acceptance is required.
