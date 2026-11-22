@@ -32,11 +32,14 @@
 | Synthetic QR camera | PASS | Chromium decoded a prerecorded QR stream and stopped the scanner. |
 | Real Professor acceptance | PASS | Confirmed Professor session in the controlled Edge InPrivate window. Role navigation, catalogue filtering, successful and no-match lookup (HTTP 200 and 404), and manual UUID input passed. Assistant scan controls and manager navigation were absent. The direct manager route displayed Access denied, and the student return-problems API returned HTTP 403. |
 | Live Student reservation | FAIL | Verified the designated Student in Laboratory 1 and the approved `TEST-DRONE-001` card. On 22 November 2026, the app submitted twice for same-day pickup, with attempted starts at 20:50 and 20:51 Beirut time and an exclusive end at 00:00 on 23 November. Both Web and Loans returned HTTP 503. Equipment item and component reads returned HTTP 200 before the failed save. The UI showed “Reservation could not be saved. Try again.” No pickup window was confirmed. |
+| Reservation failure diagnosis | PASS | The response message maps to Loans’ `reservation_unavailable` error. A read-only probe through the configured Loans role reproduced SQLSTATE `42P01` on the overlap query because `public.reservation_resources` is absent. Zero rows matched either attempted reservation. The role had unrestricted SELECT for the table and lacked the reservation INSERT column grants and an applicable INSERT policy. |
 | Live normal handover and return | BLOCKED | Awaiting a confirmed reservation and an eligible pickup window. The browser remains on the Student step. |
 | Live problematic return and manager acceptance | BLOCKED | The problematic return follows a successful normal scenario and requires a separate valid, non-overlapping pickup window. Manager acceptance requires a designated manager. |
 | Physical-device camera and deployed acceptance | NOT RUN | Desktop Chromium emulated mobile viewports and camera input. |
 
 The initial baseline build stopped at a Next.js version notice. Restoring the lockfile pin with `npm ci` resolved that. Earlier disposable harness runs hit a sub-millisecond status-guard case and a transient container socket startup error. Its final standard run passed.
+
+The live reservation blocker is in the database schema. The configured login inherits the Loans service role, and the Equipment reads before and after the database lock succeeded. Four Web gateway tests and 25 Loans reservation tests passed. The database owner should preflight the target and deploy the missing migration steps in the [documented order](../database/local-test/README.md#migration-sequence). Read-only checks found missing S2-02, S2-09, 007, S2-05 and S2-01 markers. S2-05 supplies the reservation resource table and its policies. S2-01 supplies the reservation INSERT grants and policy. This investigation made no shared writes or further submissions.
 
 ## Screenshots
 
