@@ -1,100 +1,67 @@
-# Disposable PostgreSQL migration test
+# Disposable PostgreSQL verification
 
-This harness verifies migrations 003-007 and S2-01, S2-02, S2-05, plus the
-S2-09 schema integration, without contacting Supabase. It uses PostgreSQL 16 in
-Docker, uses the isolated `unitrack-sprint2-verification` project on
-`127.0.0.1:55433`, stores the database in
-container `tmpfs`, and removes the container when the run finishes. The fixed
-database password and records are synthetic local-test values, not secrets.
+`run.ps1` exercises the combined S2-01, S2-02, S2-05, S2-09, S2-10/11 Return,
+and S2-13 custody database/application paths. It uses PostgreSQL 16 in Docker,
+the isolated `unitrack-sprint2-verification` Compose project, and loopback port
+55433. Its database is disposable and removed at the end of a successful or
+failed run unless `-KeepDatabase` is supplied. It never contacts Supabase.
 
-## What it reuses
+The separate `unitrack-migration-test` project on port 55432 contains SC's
+preserved browser acceptance fixtures. This runner sets a temporary port
+override for its own Compose process and must not be pointed at that database.
 
-The container initializes from the repository's existing `database/schema.sql`,
-`database/triggers.sql`, and request-key migration. The runner then executes the
-existing read-only preflight and applies 003, 004, 005, 006, S2-02, S2-09, 007,
-S2-05, S2-01, then the S2-01 status protection migration in order, verifying each migration. S2-09 is streamed from its
-reviewed remote-tracking Git commit into the disposable database; the teammate
-branch is not checked out or modified. It stops after any failed preflight,
-migration, SQL assertion, or focused application test.
+## Migration sequence
 
-`00_supabase_compat.sql` supplies the `auth.users(id)` object and synthetic
-`anon`/`authenticated` roles needed to exercise the Supabase-specific revoke
-path. The baseline gives those roles disposable privileges and 006 verification
-proves they are removed. It also gives one safe pre-existing service group
-deliberately excessive disposable privileges so 006 must normalize them; the
-other two service groups exercise the creation path. PostgreSQL 16 supplies
-`gen_random_uuid()`. The current
-schema and migrations use no other Supabase-only database object. This is not a
-Supabase Auth emulator and does not verify JWT claims, Supabase API behavior,
-hosted backups, login-role membership, or pooler configuration.
+The runner applies and verifies migrations in dependency order:
+
+`003 → 004 → 005 → 006 → S2-02 → S2-09 → 007 → S2-05 → S2-01 permissions → C3/C4 status guard`
+
+The S2-09 migration is the checked-in `C430PRJCT-40_S2-09_handover_confirmation.sql`;
+it is applied twice to verify idempotency. Its verification runs before and
+after migration 007. S2-02's confirmed-only exclusion constraint is verified
+again after S2-09. Migration 007 keeps final `public.loans` update privileges
+limited to `returned_at` and `return_operation`, without removing S2-09 loan
+insert privileges or reservation permissions.
+
+The harness applies the actual S2-01 permission migration, then its status
+guard migration. The synthetic S2-01 grant file from the original S2-09 branch
+is not used by the runner, integration tests, or manual fixture setup. The
+restricted-role handover tests verify the real grant and revoke/reapply only
+that column privilege for negative-path tests.
 
 ## Run
 
-Start Docker Desktop, then run from the repository root:
+From the repository root with Docker Desktop running:
 
 ```powershell
 & .\database\local-test\run.ps1
 ```
 
-No host `psql` installation is required. The runner uses the client inside the
-container and sets `UNITRACK_TEST_DATABASE_URL` only for the focused Vitest
-child process. The integration test refuses every URL except the fixed local
-loopback database created by this harness.
-
-Expected final output:
-
-```text
-PASS: migrations 003-007, S2-01, S2-02, S2-05, S2-09 schema integration and C3/C4 status protection, plus focused local integration checks, passed.
-```
-
-The saved browser acceptance database uses the separate
-`unitrack-migration-test` project on port `55432`; this test runner never
-resets or removes it. The runner sets a temporary port override for its own
-Compose process, while browser fixture commands retain the default port.
-The focused tests cover S2-02 overlapping and adjacent reservations, pending
-and cancelled rows, and different items. S2-05 verification checks least-
-privilege grants and the confirmed-only resource exclusion constraint. The
-Equipment PostgreSQL suite exercises kit creation, edits, tracked component
-membership, soft removal and validation. The Loans PostgreSQL suite exercises
-concurrent reservation attempts, kit/component conflicts in both directions,
-component-list changes during reservations, and unchanged current equipment
-status. These suites use only the fixed loopback database.
-The restricted Loans-role status-guard suite verifies unfinished-handover
-blocks, handover completion/recovery, confirmed compensation, fulfilled
-terminality, and serialization of a cancellation attempt against handover.
-
-The focused return tests also cover migrated column definitions, both unique partial
-indexes, immutable history, migration 005 ownership triggers, exact replay,
-conflicting replay, keyed no-ops, legacy ownership clearing, stale ABA undo
-rejection, and a clean/replayed Loans return using the production Loans service
-as the restricted `unitrack_loans_service` role and the Equipment transaction
-function against real PostgreSQL. Migration 006 also
-checks password-free group roles, least-privilege grants, RLS policies, owned
-table operations, sequence access, and denied cross-service table reads.
-Migration 007 checks immutable loan and condition history, pickup and return
-condition INSERT permissions, recovery/compensation state transitions, a
-commit-time completed-return invariant, and compatibility with legacy returned
-loans.
-
-## S2-09 / reservation integration
-
-The runner applies and verifies the real teammate migration after S2-02 and
-before 007. LJ's S2-01 permissions are then applied after S2-05 and verified
-against S2-09's real `handover_operation` column and update policy. Migration 007
-deliberately runs before S2-05/S2-01 for `public.loans` so its final ACL is
-column-level UPDATE on only `returned_at` and `return_operation`; it does not
-revoke S2-09's loan INSERT columns or any `public.reservations` permissions.
-Keep S2-09's confirmation/identity-evidence trigger alongside 007's loan trigger.
-The local verifier checks S2-09's grants before S2-01 and checks preservation of
-the handover column privilege/policy from S2-01's verifier. The S2-09 application
-integration test remains on the teammate branch and is not run from this branch.
-
-If a run is interrupted, remove only the isolated verification Compose
-project. Do not substitute the `unitrack-migration-test` project used for
-preserved browser fixtures:
+No host `psql` is needed. The runner sets `UNITRACK_TEST_DATABASE_URL` only for
+focused Vitest children; those tests reject any URL other than the fixed local
+loopback URL. `-KeepDatabase` preserves only the disposable 55433 project after
+a successful run for local inspection. To remove it manually:
 
 ```powershell
 docker compose --project-name unitrack-sprint2-verification --file .\database\local-test\compose.yaml down --volumes --remove-orphans
 ```
 
-Do not substitute a Supabase URL or copy real data into this harness.
+## Coverage
+
+The baseline uses synthetic auth roles and data to exercise Supabase-specific
+SQL paths; it is not a Supabase Auth emulator. The migrations and verifiers
+cover least-privilege service roles, RLS, S2-01 inserts/status updates, S2-02
+overlap exclusion, S2-05 kit/resource integrity, S2-09 handover permissions,
+and S2-13 custody constraints.
+
+Focused PostgreSQL suites cover kit creation/edit/component membership and
+validation; reservation overlaps, adjacency, status filtering, concurrency,
+kit/component conflicts and unchanged current equipment status; restricted
+Loans C3/C4 status protection; S2-09 completion, recovery, compensation and
+handover concurrency; and Return migration/replay/rollback/ownership behavior.
+Fixtures and credentials are synthetic local-test values, not secrets. Never
+substitute a shared database URL or copy real data into this harness.
+
+The manual browser handover fixture is separate and uses
+`handover-manual.ps1`; it applies the real S2-01 migration and is not invoked by
+the combined verification runner. See [handover docs](../../docs/handover-s2-09.md).

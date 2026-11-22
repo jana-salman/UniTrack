@@ -10,3 +10,4 @@ export function loansFailure(error: unknown): Response {
   return Response.json({ error: "Loans is unavailable. Verify the return state before retrying.", code: "loans_unavailable" }, { status: 503 });
 }
 export const uncertain = () => new LoansError(503, "return_state_uncertain", "The return result needs verification. Retry the same return information or ask staff to reconcile it.");
+export const handoverUncertain = () => new LoansError(503, "handover_state_uncertain", "The handover result needs verification. Retry the same handover information or ask staff to reconcile it.");
