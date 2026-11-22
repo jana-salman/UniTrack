@@ -352,17 +352,35 @@ localDescribe("C430PRJCT-40 handover on disposable PostgreSQL", () => {
     expect(await itemStatus(items.overlap)).toBe("checked_out");
   });
 
-  it("final submission re-verifies on committed state: reservation cancelled by another connection after checkout -> 409, Reserved restored, no loan", async () => {
+  it("race: another connection's cancellation after checkout is rejected by C3 (handover unfinished); the handover then completes with no undo", async ({ skip }) => {
+    // C3 lives in LJ's S2-01_reservation_status_protection.sql (PR #28), applied
+    // after S2-09 in production order. Without it this race is not protected,
+    // so the case only runs where that real migration is installed.
+    const c3Installed = (await admin.query("select 1 from pg_trigger where tgname = 'reservations_protect_status_transition' and tgrelid = 'public.reservations'::regclass")).rows.length > 0;
+    if (!c3Installed) skip("requires LJ's C3 reservation status protection (PR #28)");
     const item = items.finalCancel, reservation = reservations.finalCancel;
-    hooks.afterApply = async () => { await admin.query("update public.reservations set status = 'cancelled' where id = $1", [reservation]); };
-    await expect(submit(reservation, { studentConfirmed: true, conditions: kitChecklist(item) })).rejects.toMatchObject({ status: 409, code: "handover_conflict", message: "Only confirmed reservations can be handed over." });
-    expect(await itemStatus(item)).toBe("reserved");
-    expect(await loansFor(reservation)).toHaveLength(0);
-    expect((await admin.query("select count(*)::int as n from public.condition_records where item_id = $1", [item])).rows[0].n).toBe(0);
+    let raced: unknown = "not attempted";
+    // Between checkout and the final loan transaction the durable plan is
+    // 'applied'; another writer tries to cancel the reservation.
+    hooks.afterApply = async () => {
+      raced = await attempt("update public.reservations set status = 'cancelled' where id = $1", [reservation]).catch((error: unknown) => error);
+    };
+    const result = await submit(reservation, { studentConfirmed: true, conditions: kitChecklist(item) });
+    expect(raced).toMatchObject({ code: "23514", constraint: "reservations_handover_status_protected" });
+    expect(result.status).toBe("checked_out");
+    expect(await itemStatus(item)).toBe("checked_out");
+    expect(await reservationRow(reservation)).toEqual({ status: "fulfilled", state: "completed" });
+    const loans = await loansFor(reservation);
+    expect(loans).toHaveLength(1);
+    expect(loans[0].id).toBe(result.loanId);
+    const pickup = await pickupFor(result.loanId);
+    expect(pickup).toHaveLength(6);
+    expect(pickup.map(row => row.kit_component_id)).toEqual([null, ...componentIds(item)]);
+    expect((await admin.query("select count(*)::int as n from public.condition_records where item_id = $1", [item])).rows[0].n).toBe(6);
+    // Exactly one checkout and no compensation.
     const history = await admin.query<{ new_status: string; request_key: string }>("select new_status, request_key from public.equipment_status_history where item_id = $1 order by id", [item]);
-    expect(history.rows.map(r => r.new_status)).toEqual(["checked_out", "reserved"]);
-    expect(history.rows[1].request_key).toMatch(/:0:undo$/);
-    expect((await admin.query("select handover_operation ->> 'state' as state from public.reservations where id = $1", [reservation])).rows[0].state).toBe("compensated");
+    expect(history.rows.map(r => r.new_status)).toEqual(["checked_out"]);
+    expect(history.rows.some(r => r.request_key?.endsWith(":undo"))).toBe(false);
   });
 
   it("race: another connection's overlapping confirmed reservation during handover is refused by S2-02; the handover completes", async () => {
